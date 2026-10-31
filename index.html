@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Báo Cáo Đối Soát Tồn Kho 3D & Kiểm Kê PDA Multi-Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <!-- SheetJS for reading/writing all Excel/CSV/TSV formats -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- Three.js for interactive 3D warehouse & bar visualization -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <!-- Chart.js for executive dynamic charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-grid-3d"></div>
+
+  <div class="app-container">
+    <!-- TOP EXECUTIVE HEADER -->
+    <header class="top-header">
+      <div class="brand-group">
+        <div class="brand-cube" title="3D Multi-Agent Inventory System">📦</div>
+        <div class="brand-title">
+          <h1>BÁO CÁO ĐỐI SOÁT TỒN KHO & KIỂM KÊ PDA 3D</h1>
+          <div class="brand-subtitle">
+            <span>Hệ thống Đối soát Đa Tác Tử (Multi-Agent Reconciliation)</span>
+            <span class="badge-scope">Kho: 01 & 61 | Mã hàng: 3*, 5*, 7*</span>
+            <span class="badge-scope" id="header-timestamp">Cập nhật: 31/10/2026</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button class="btn-3d btn-emerald" id="btn-open-pda" onclick="openPdaModal()">
+          <span>📱</span> Máy Quét PDA (Nhập Trực Tiếp)
+        </button>
+        <button class="btn-3d btn-primary" id="btn-export-excel" onclick="exportFullExcelReport()">
+          <span>📥</span> Xuất Excel Báo Cáo (5 Sheet)
+        </button>
+        <button class="btn-3d btn-glass" onclick="restoreDefaultData()" title="Nạp lại dữ liệu gốc từ Stock list.xlsx & kiêm kho 31.10.2026.xlsx">
+          <span>🔄</span> Khôi Phục Dữ Liệu Gốc
+        </button>
+        <button class="btn-3d btn-rose" onclick="clearAllSources()" title="Xóa toàn bộ 2 bảng dữ liệu nguồn về 0">
+          <span>🗑️</span> Xóa Tất Cả Về 0
+        </button>
+      </div>
+    </header>
+
+    <!-- MULTI-AGENT RECONCILIATION STATUS BAR -->
+    <section class="agent-pipeline" aria-label="Multi-Agent Pipeline">
+      <div class="agent-card">
+        <div class="agent-dot" id="agent1-dot"></div>
+        <div class="agent-info">
+          <h4>Agent 1: Stock Scope Filter</h4>
+          <p id="agent1-status">Lọc Kho 01, 61 & Item 3*, 5*, 7*</p>
+        </div>
+      </div>
+      <div class="agent-card">
+        <div class="agent-dot" id="agent2-dot"></div>
+        <div class="agent-info">
+          <h4>Agent 2: TagID-to-Qty Matcher</h4>
+          <p id="agent2-status">Đối soát TagID PDA → Số lượng tồn</p>
+        </div>
+      </div>
+      <div class="agent-card">
+        <div class="agent-dot" id="agent3-dot"></div>
+        <div class="agent-info">
+          <h4>Agent 3: Anomaly & Duplicate Guard</h4>
+          <p id="agent3-status">Chống cộng trùng TagID & kiểm tra BIN</p>
+        </div>
+      </div>
+      <div class="agent-card">
+        <div class="agent-dot" id="agent4-dot"></div>
+        <div class="agent-info">
+          <h4>Agent 4: Executive Report Synthesizer</h4>
+          <p id="agent4-status">Tổng hợp KPI 3D & Xuất Excel đa Sheet</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2 SOURCE DATA BOXES (NHẬP FILE TỒN KHO & FILE KIỂM KÊ + XÓA DỮ LIỆU CŨ) -->
+    <section class="data-source-grid">
+      <!-- BẢNG NGUỒN 1: FILE TỒN KHO -->
+      <div class="source-box">
+        <div class="source-header">
+          <div class="source-title-wrap">
+            <h3>🏛️ Bảng Nguồn 1: Dữ Liệu Tồn Kho (Stock List)</h3>
+            <p id="stock-file-label">Đang nạp: Stock list.xlsx (Hỗ trợ .xlsx, .xls, .csv, .tsv, .json, .txt)</p>
+          </div>
+          <span class="source-status-badge" id="stock-status-badge">Đang hoạt động</span>
+        </div>
+
+        <div class="source-metrics">
+          <div class="sm-item">
+            <span>Tổng dòng file gốc</span>
+            <strong id="sm-stock-raw">0</strong>
+          </div>
+          <div class="sm-item">
+            <span>TagID hợp lệ (Kho 01,61 | 3*,5*,7*)</span>
+            <strong id="sm-stock-filtered">0</strong>
+          </div>
+          <div class="sm-item">
+            <span>Tổng Số Lượng Tồn</span>
+            <strong id="sm-stock-qty">0</strong>
+          </div>
+        </div>
+
+        <div class="source-actions">
+          <input type="file" id="input-file-stock" class="file-input-hidden" accept=".xlsx,.xls,.csv,.tsv,.json,.txt,.xml" onchange="handleStockFileUpload(event)" />
+          <button class="btn-3d btn-primary" onclick="document.getElementById('input-file-stock').click()">
+            <span>📂</span> Nhập File Tồn Kho Mới
+          </button>
+          <button class="btn-3d btn-rose" onclick="clearStockData()">
+            <span>🗑️</span> Xóa Dữ Liệu Cũ (Tồn Kho)
+          </button>
+        </div>
+      </div>
+
+      <!-- BẢNG NGUỒN 2: FILE KIỂM KÊ / MÁY QUÉT PDA -->
+      <div class="source-box">
+        <div class="source-header">
+          <div class="source-title-wrap">
+            <h3>🔫 Bảng Nguồn 2: Dữ Liệu Quét Kiểm Kê (TagID / Batch)</h3>
+            <p id="scan-file-label">Đang nạp: kiêm kho 31.10.2026.xlsx (Quét PDA thực tế & đối soát)</p>
+          </div>
+          <span class="source-status-badge" id="scan-status-badge">Đang hoạt động</span>
+        </div>
+
+        <div class="source-metrics">
+          <div class="sm-item">
+            <span>Tổng lượt quét PDA</span>
+            <strong id="sm-scan-raw">0</strong>
+          </div>
+          <div class="sm-item">
+            <span>TagID duy nhất (Unique)</span>
+            <strong id="sm-scan-unique">0</strong>
+          </div>
+          <div class="sm-item">
+            <span>Cảnh báo trùng TagID</span>
+            <strong id="sm-scan-dup" style="color: #fbbf24;">0</strong>
+          </div>
+        </div>
+
+        <div class="source-actions">
+          <input type="file" id="input-file-scan" class="file-input-hidden" accept=".xlsx,.xls,.csv,.tsv,.json,.txt,.xml" onchange="handleScanFileUpload(event)" />
+          <button class="btn-3d btn-primary" onclick="document.getElementById('input-file-scan').click()">
+            <span>📂</span> Nhập File Kiểm Kê Mới
+          </button>
+          <button class="btn-3d btn-emerald" onclick="openPdaModal()">
+            <span>📱</span> Mở Máy Quét PDA (Bảng Nổi)
+          </button>
+          <button class="btn-3d btn-rose" onclick="clearScanData()">
+            <span>🗑️</span> Xóa Dữ Liệu Cũ (Kiểm Kê)
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- FILTER BAR (KHO 01, 61 & ITEM 3*, 5*, 7*) -->
+    <section class="filter-bar">
+      <div class="filter-group">
+        <span class="filter-label">Kho (Warehouse):</span>
+        <button class="chip-btn active" data-wh="ALL" onclick="setWarehouseFilter('ALL', this)">Tất cả (01 & 61)</button>
+        <button class="chip-btn" data-wh="01" onclick="setWarehouseFilter('01', this)">Kho 01</button>
+        <button class="chip-btn" data-wh="61" onclick="setWarehouseFilter('61', this)">Kho 61</button>
+
+        <span class="filter-label" style="margin-left: 14px;">Nhóm Mã (Item Prefix):</span>
+        <button class="chip-btn active" data-pfx="ALL" onclick="setPrefixFilter('ALL', this)">Tất cả (3*, 5*, 7*)</button>
+        <button class="chip-btn" data-pfx="3" onclick="setPrefixFilter('3', this)">Mã 3*</button>
+        <button class="chip-btn" data-pfx="5" onclick="setPrefixFilter('5', this)">Mã 5*</button>
+        <button class="chip-btn" data-pfx="7" onclick="setPrefixFilter('7', this)">Mã 7*</button>
+      </div>
+
+      <div class="filter-group">
+        <input type="text" id="global-search" class="search-input" placeholder="🔍 Tìm Mã hàng, TagID (Batch), Vị trí (BIN), User..." oninput="handleGlobalSearch(this.value)" />
+      </div>
+    </section>
+
+    <!-- 6 DYNAMIC 3D KPI CARDS -->
+    <section class="kpi-grid-3d">
+      <!-- KPI 1: TỔNG TỒN KHO -->
+      <div class="kpi-card-3d" data-tilt>
+        <div class="kpi-top">
+          <span class="kpi-label">1. Tổng Lượng Tồn Kho</span>
+          <div class="kpi-icon">📦</div>
+        </div>
+        <div class="kpi-value" id="kpi-stock-qty">0</div>
+        <div class="kpi-sub">
+          <span id="kpi-stock-tags">0 TagID (Batch)</span>
+          <strong id="kpi-stock-items">0 Mã hàng</strong>
+        </div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" id="bar-stock" style="width: 100%"></div></div>
+      </div>
+
+      <!-- KPI 2: SỐ LƯỢNG KIỂM ĐƯỢC -->
+      <div class="kpi-card-3d emerald" data-tilt>
+        <div class="kpi-top">
+          <span class="kpi-label">2. Số Lượng Kiểm Được</span>
+          <div class="kpi-icon">✅</div>
+        </div>
+        <div class="kpi-value" id="kpi-scanned-qty">0</div>
+        <div class="kpi-sub">
+          <span id="kpi-scanned-tags">0 TagID khớp</span>
+          <strong id="kpi-scanned-pct" style="color: #34d399;">0%</strong>
+        </div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" id="bar-scanned" style="width: 0%"></div></div>
+      </div>
+
+      <!-- KPI 3: SỐ LƯỢNG THIẾU SO VỚI TỒN -->
+      <div class="kpi-card-3d rose" data-tilt>
+        <div class="kpi-top">
+          <span class="kpi-label">3. Số Lượng Thiếu (Chưa Quét)</span>
+          <div class="kpi-icon">⚠️</div>
+        </div>
+        <div class="kpi-value" id="kpi-missing-qty">0</div>
+        <div class="kpi-sub">
+          <span id="kpi-missing-tags">0 TagID thiếu</span>
+          <strong id="kpi-missing-pct" style="color: #fb7185;">0%</strong>
+        </div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" id="bar-missing" style="width: 0%"></div></div>
+      </div>
+
+      <!-- KPI 4: CẢNH BÁO TRÙNG TAGID -->
+      <div class="kpi-card-3d amber" data-tilt onclick="switchTab('tab-duplicates')" style="cursor: pointer;">
+        <div class="kpi-top">
+          <span class="kpi-label">4. Cảnh Báo Trùng TagID</span>
+          <div class="kpi-icon">🔁</div>
+        </div>
+        <div class="kpi-value" id="kpi-dup-tags">0</div>
+        <div class="kpi-sub">
+          <span id="kpi-dup-extra">0 lượt quét dư</span>
+          <strong id="kpi-dup-prevented" style="color: #fbbf24;">Chặn +0 SL ảo</strong>
+        </div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" id="bar-dup" style="width: 0%"></div></div>
+      </div>
+
+      <!-- KPI 5: LỆCH VỊ TRÍ BIN -->
+      <div class="kpi-card-3d amber" data-tilt onclick="filterDetailByStatus('LOC_DIFF')" style="cursor: pointer;">
+        <div class="kpi-top">
+          <span class="kpi-label">5. Lệch Vị Trí (BIN ≠ Quét)</span>
+          <div class="kpi-icon">📍</div>
+        </div>
+        <div class="kpi-value" id="kpi-loc-diff">0</div>
+        <div class="kpi-sub">
+          <span>TagID khác vị trí sổ</span>
+          <strong id="kpi-loc-pct">0% Tag khớp</strong>
+        </div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" id="bar-loc" style="width: 0%"></div></div>
+      </div>
+
+      <!-- KPI 6: TAG NGOÀI PHẠM VI / LẠ -->
+      <div class="kpi-card-3d" data-tilt onclick="switchTab('tab-unmatched')" style="cursor: pointer;">
+        <div class="kpi-top">
+          <span class="kpi-label">6. Tag Ngoài Phạm Vi / Lạ</span>
+          <div class="kpi-icon">🔍</div>
+        </div>
+        <div class="kpi-value" id="kpi-out-tags">0</div>
+        <div class="kpi-sub">
+          <span id="kpi-out-other">0 kho khác</span>
+          <strong id="kpi-out-unknown">0 chưa có sổ</strong>
+        </div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" id="bar-out" style="width: 0%"></div></div>
+      </div>
+    </section>
+
+    <!-- 3D WAREHOUSE VISUALIZATION & INTERACTIVE EXECUTIVE CHARTS -->
+    <section class="visuals-grid">
+      <!-- 3D WebGL Interactive Chart -->
+      <div class="panel-3d">
+        <div class="panel-header">
+          <h3>🧊 Mô Hình 3D Đối Soát Kho (01 & 61) Theo Nhóm Mã (3*, 5*, 7*)</h3>
+          <span class="panel-badge">Kéo chuột để xoay 3D</span>
+        </div>
+        <div id="three-canvas-container">
+          <div class="three-legend">
+            <span>🟢 Cột Xanh: SL Kiểm Được</span>
+            <span>🔴 Cột Đỏ: SL Thiếu</span>
+            <span>🖱️ Giữ chuột trái xoay góc nhìn</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chart 1: Comparison by Prefix & Warehouse -->
+      <div class="panel-3d">
+        <div class="panel-header">
+          <h3>📊 Đối Soát Số Lượng Kiểm Được vs Thiếu Theo Nhóm Hàng</h3>
+          <span class="panel-badge">Đơn vị: Số lượng (Qty)</span>
+        </div>
+        <div class="chart-box">
+          <canvas id="chart-prefix"></canvas>
+        </div>
+      </div>
+
+      <!-- Chart 2: Completion & User Scan Breakdown -->
+      <div class="panel-3d">
+        <div class="panel-header">
+          <h3>👥 Hiệu Suất Quét PDA Theo Nhân Sự & Tỷ Lệ Khớp</h3>
+          <span class="panel-badge">Lượt quét PDA</span>
+        </div>
+        <div class="chart-box">
+          <canvas id="chart-users"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- EXECUTIVE SUMMARY MATRIX FOR MANAGEMENT (NGẮN GỌN, DỄ NHÌN CHO CẤP TRÊN) -->
+    <section class="panel-3d exec-summary-section">
+      <div class="panel-header">
+        <h3>📋 BẢNG TỔNG QUAN BÁO CÁO LÃNH ĐẠO (THEO KHO 01, 61 & NHÓM MÃ 3*, 5*, 7*)</h3>
+        <span class="panel-badge">Tự động quy đổi TagID quét PDA → Số lượng tồn kho chính xác</span>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="exec-matrix-table">
+          <thead>
+            <tr>
+              <th>Kho (WH)</th>
+              <th>Nhóm Mã Hàng</th>
+              <th class="num-col">Số Mã Hàng</th>
+              <th class="num-col">Tổng Tag Tồn</th>
+              <th class="num-col">Tag Kiểm Được</th>
+              <th class="num-col">Tag Thiếu</th>
+              <th class="num-col">Tỷ Lệ Tag (%)</th>
+              <th class="num-col">Tổng SL Tồn Kho</th>
+              <th class="num-col" style="color:#34d399;">SL Kiểm Được (Khớp Tag)</th>
+              <th class="num-col" style="color:#fb7185;">SL Thiếu So Với Tồn</th>
+              <th class="num-col">Tỷ Lệ Đạt SL (%)</th>
+              <th>Đánh Giá</th>
+            </tr>
+          </thead>
+          <tbody id="exec-matrix-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- DETAILED TABS SECTION -->
+    <section class="panel-3d">
+      <div class="tabs-header">
+        <button class="tab-btn active" data-tab="tab-items" onclick="switchTab('tab-items')">
+          📦 1. Tổng Hợp Theo Từng Mã Hàng & Vị Trí <span class="tab-count" id="count-tab-items">0</span>
+        </button>
+        <button class="tab-btn" data-tab="tab-details" onclick="switchTab('tab-details')">
+          🏷️ 2. Chi Tiết Đối Soát Từng TagID (Batch) <span class="tab-count" id="count-tab-details">0</span>
+        </button>
+        <button class="tab-btn" data-tab="tab-duplicates" onclick="switchTab('tab-duplicates')">
+          🔁 3. Cảnh Báo Trùng TagID <span class="tab-count" id="count-tab-duplicates">0</span>
+        </button>
+        <button class="tab-btn" data-tab="tab-unmatched" onclick="switchTab('tab-unmatched')">
+          🔍 4. TagID Ngoài Phạm Vi / Chưa Có Sổ <span class="tab-count" id="count-tab-unmatched">0</span>
+        </button>
+        <button class="tab-btn" data-tab="tab-pda-log" onclick="switchTab('tab-pda-log')">
+          🔫 5. Bảng Dữ Liệu Quét PDA (Mới Nhất Trên Cùng) <span class="tab-count" id="count-tab-pda-log">0</span>
+        </button>
+      </div>
+
+      <!-- Sub-filter bar for Tab 1 & Tab 2 -->
+      <div id="subfilter-bar" style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:10px; margin-bottom:12px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;" id="status-filter-buttons">
+          <button class="chip-btn active" onclick="setStatusFilter('ALL', this)">Tất cả trạng thái</button>
+          <button class="chip-btn" onclick="setStatusFilter('MISSING', this)">⚠️ Có Thiếu Hụt (Chưa Quét)</button>
+          <button class="chip-btn" onclick="setStatusFilter('COMPLETE', this)">✅ Đã Kiểm Đủ 100%</button>
+          <button class="chip-btn" onclick="setStatusFilter('DUP', this)">🔁 Trùng TagID</button>
+          <button class="chip-btn" onclick="setStatusFilter('LOC_DIFF', this)">📍 Lệch Vị Trí BIN</button>
+        </div>
+        <div style="font-size:0.78rem; color:#94a3b8;" id="table-showing-info">Hiển thị dữ liệu đối soát</div>
+      </div>
+
+      <!-- TAB 1: BY ITEM CODE -->
+      <div id="tab-items" class="tab-pane">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>STT</th>
+                <th>Kho</th>
+                <th>Mã Hàng (Stock Code)</th>
+                <th>Nhóm</th>
+                <th class="num-col">Tổng Tag Tồn</th>
+                <th class="num-col">Tag Đã Quét</th>
+                <th class="num-col">Tag Thiếu</th>
+                <th class="num-col">SL Tồn Kho</th>
+                <th class="num-col" style="color:#34d399;">SL Kiểm Được</th>
+                <th class="num-col" style="color:#fb7185;">SL Thiếu</th>
+                <th class="num-col">% Đạt SL</th>
+                <th>Vị Trí Sổ (BIN)</th>
+                <th>Vị Trí Quét Thực Tế</th>
+                <th>Trạng Thái</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-items"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TAB 2: BY TAGID / BATCH -->
+      <div id="tab-details" class="tab-pane" style="display:none;">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>STT</th>
+                <th>Kho</th>
+                <th>Mã Hàng (Stock Code)</th>
+                <th>TagID / Batch</th>
+                <th class="num-col">SL Tồn Kho</th>
+                <th class="num-col" style="color:#34d399;">SL Kiểm Được</th>
+                <th class="num-col" style="color:#fb7185;">SL Thiếu</th>
+                <th>BIN Tồn Kho</th>
+                <th>Vị Trí Quét PDA</th>
+                <th class="num-col">Số Lần Quét</th>
+                <th>User Quét</th>
+                <th>Thời Gian Quét</th>
+                <th>Trạng Thái Đối Soát</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-details"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TAB 3: DUPLICATE TAG ALERTS -->
+      <div id="tab-duplicates" class="tab-pane" style="display:none;">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>STT</th>
+                <th>TagID Bị Quét Trùng</th>
+                <th class="num-col">Số Lần Quét</th>
+                <th>Kho</th>
+                <th>Mã Hàng</th>
+                <th class="num-col">SL Thực Tế (1 Tag)</th>
+                <th class="num-col" style="color:#fbbf24;">SL Ảo Đã Ngăn Chặn</th>
+                <th>BIN Tồn Kho</th>
+                <th>Chi Tiết Các Lượt Quét (Dòng STT | User | Vị Trí | Thời Gian)</th>
+                <th>Cảnh Báo</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-duplicates"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TAB 4: UNMATCHED / OUT OF SCOPE TAGS -->
+      <div id="tab-unmatched" class="tab-pane" style="display:none;">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>STT</th>
+                <th>TagID Quét PDA</th>
+                <th>Vị Trí Quét</th>
+                <th>User Quét</th>
+                <th>Thời Gian Quét</th>
+                <th>Phân Loại Ngoại Lệ</th>
+                <th>Thông Tin Tìm Thấy Ở Kho/Mã Khác (Nếu Có)</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-unmatched"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TAB 5: LIVE PDA SCAN TABLE (NEWEST ON TOP) -->
+      <div id="tab-pda-log" class="tab-pane" style="display:none;">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Thứ Tự Bảng</th>
+                <th>STT Gốc</th>
+                <th>Tag ID (Batch)</th>
+                <th>Vị Trí Quét</th>
+                <th>User Quét (USE)</th>
+                <th>Thời Gian Quét</th>
+                <th>Mã Hàng Khớp (Kho 01/61)</th>
+                <th class="num-col">Số Lượng Quy Đổi</th>
+                <th>Trạng Thái</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-pda-log"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ========================================================================
+       BẢNG NỔI MÁY QUÉT MÃ VẠCH PDA (FLOATING PDA BARCODE SCANNER MODAL)
+       Giao diện chuẩn súng PDA: Nhập USER -> Ô Vị trí -> Ô TagID -> Ô Số lượng -> OK
+       Khi bấm OK: Ghi nhận ngay lên dòng trên cùng (Top 1) và đối soát tức thì!
+       ======================================================================== -->
+  <div class="pda-modal-overlay" id="pda-modal-overlay">
+    <div class="pda-device-wrapper">
+      <!-- Left: Industrial PDA Handheld Scanner -->
+      <div class="pda-handheld">
+        <div class="pda-laser-bar"></div>
+        <div class="pda-top-status">
+          <span>📡 PDA SCANNER PRO v4.0</span>
+          <span id="pda-clock">31/10/2026</span>
+          <span style="color:#34d399;">● ONLINE</span>
+        </div>
+
+        <div class="pda-screen">
+          <!-- Step 1: USER (Tên người dùng USE) -->
+          <div class="pda-user-box">
+            <div class="pda-field-label">
+              <span>👤 1. Tên Người Dùng (USER / USE)</span>
+              <span style="font-size:0.68rem; color:#93c5fd;">Bắt buộc</span>
+            </div>
+            <input type="text" id="pda-input-user" class="pda-input" placeholder="Nhập tên User (VD: Thanh, Nam, Luu...)" value="Thanh" onkeydown="handlePdaKeydown(event, 'pda-input-loc')" />
+          </div>
+
+          <!-- Step 2: Ô Quét Vị Trí (Xuống dưới) -->
+          <div>
+            <div class="pda-field-label">
+              <span>📍 2. Ô Quét Vị Trí (BIN / Location)</span>
+              <span style="font-size:0.68rem; color:#94a3b8;">Enter ↓ xuống TagID</span>
+            </div>
+            <input type="text" id="pda-input-loc" class="pda-input" placeholder="Quét hoặc nhập Vị trí (VD: 140403)..." onkeydown="handlePdaKeydown(event, 'pda-input-tag')" />
+          </div>
+
+          <!-- Step 3: Ô Quét TagID (Xuống dưới) -->
+          <div>
+            <div class="pda-field-label">
+              <span>🏷️ 3. Ô Quét TagID (Batch)</span>
+              <span style="font-size:0.68rem; color:#94a3b8;">Enter ↓ xuống Số lượng</span>
+            </div>
+            <input type="text" id="pda-input-tag" class="pda-input" placeholder="Quét mã vạch TagID (VD: 100006178595)..." oninput="handlePdaTagLookup(this.value)" onkeydown="handlePdaKeydown(event, 'pda-input-qty')" />
+          </div>
+
+          <!-- Live Lookup Preview Box -->
+          <div class="pda-live-lookup" id="pda-live-lookup">
+            💡 Quét TagID để tự động tra cứu Mã hàng, Kho, BIN & Số lượng tồn kho...
+          </div>
+
+          <!-- Step 4: Ô Số Lượng (Xuống dưới) -->
+          <div>
+            <div class="pda-field-label">
+              <span>🔢 4. Ô Số Lượng (Qty)</span>
+              <span style="font-size:0.68rem; color:#94a3b8;">Tự động lấy từ Tồn kho / Nhập tay</span>
+            </div>
+            <input type="number" id="pda-input-qty" class="pda-input" placeholder="Tự động theo TagID hoặc nhập số lượng..." onkeydown="handlePdaKeydown(event, 'SUBMIT')" />
+          </div>
+
+          <!-- Step 5: Nút OK Ghi Nhận -->
+          <button type="button" class="pda-ok-btn" onclick="submitPdaScan()">
+            ✅ OK — GHI NHẬN LÊN DÒNG TRÊN CÙNG
+          </button>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; gap:8px;">
+          <button class="btn-3d btn-glass" style="flex:1; justify-content:center;" onclick="fillSampleUnscannedTag()">
+            ⚡ Thử Tag Chưa Quét
+          </button>
+          <button class="btn-3d btn-rose" style="flex:1; justify-content:center;" onclick="closePdaModal()">
+            ✖ Đóng Máy PDA
+          </button>
+        </div>
+      </div>
+
+      <!-- Right: Live Scan Table inside PDA Modal (Top Row = Newest Scan) -->
+      <div class="pda-log-panel">
+        <div class="panel-header" style="margin-bottom:4px;">
+          <div>
+            <h3>📋 BẢNG GHI NHẬN QUÉT PDA TRỰC TIẾP (DÒNG MỚI NHẤT Ở TRÊN CÙNG)</h3>
+            <p style="font-size:0.78rem; color:#94a3b8; margin-top:2px;">
+              Mỗi lần bấm <strong>OK</strong>, dữ liệu quét được chèn ngay lên <strong>Dòng 1 (Trên cùng)</strong> và tự động đối soát với bảng Tồn kho.
+            </p>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn-3d btn-primary" onclick="exportPdaScansOnly()">
+              <span>💾</span> Xuất File Quét PDA (.xlsx)
+            </button>
+            <button class="btn-3d btn-rose" onclick="clearScanData()">
+              <span>🗑️</span> Xóa Bảng Quét Về 0
+            </button>
+          </div>
+        </div>
+
+        <div class="table-wrap" style="flex:1; max-height: 520px;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Dòng</th>
+                <th>User (USE)</th>
+                <th>Vị Trí</th>
+                <th>TagID (Batch)</th>
+                <th class="num-col">Số Lượng</th>
+                <th>Mã Hàng Đối Soát</th>
+                <th>Kho</th>
+                <th>Thời Gian</th>
+                <th>Trạng Thái</th>
+              </tr>
+            </thead>
+            <tbody id="pda-modal-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Default Dataset Bundle (Stock list.xlsx + kiêm kho 31.10.2026.xlsx) -->
+  <script src="default_data.js"></script>
+  <!-- Main Application & Multi-Agent Reconciliation Engine -->
+  <script src="app.js"></script>
+</body>
+</html>
