@@ -1,4 +1,4 @@
-const CACHE_NAME = 'inv-3d-pda-cache-v2';
+const CACHE_NAME = 'inv-3d-pda-cache-v3';
 const OFFLINE_ASSETS = [
   './',
   './index.html',

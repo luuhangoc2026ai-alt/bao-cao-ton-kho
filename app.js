@@ -2394,7 +2394,9 @@ function init3DScene() {
   threeCamera.lookAt(0, 1.8, 0);
 
   threeRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  threeRenderer.setSize(w, h);
+  threeRenderer.setSize(w, h, false);
+  threeRenderer.domElement.style.width = '100%';
+  threeRenderer.domElement.style.height = '340px';
   threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.insertBefore(threeRenderer.domElement, container.firstChild);
 
@@ -2453,12 +2455,27 @@ function init3DScene() {
 
 function resize3DScene() {
   const container = document.getElementById('three-canvas-container');
+  const panel = document.getElementById('panel-3d-main');
   if (!container || !threeRenderer || !threeCamera) return;
+
+  const isExpanded = Boolean(panel && panel.classList.contains('expanded-3d'));
+  if (!isExpanded && threeRenderer.domElement) {
+    // Clear any fixed pixel dimensions from fullscreen mode so CSS Grid column shrinks back to its original 1.35fr track
+    threeRenderer.domElement.style.width = '100%';
+    threeRenderer.domElement.style.height = '340px';
+    container.style.width = '100%';
+    container.style.height = '340px';
+  }
+
   const w = container.clientWidth || 520;
-  const h = container.clientHeight || 340;
+  const h = isExpanded ? (container.clientHeight || 620) : 340;
   threeCamera.aspect = w / h;
   threeCamera.updateProjectionMatrix();
-  threeRenderer.setSize(w, h);
+  threeRenderer.setSize(w, h, false);
+  if (threeRenderer.domElement) {
+    threeRenderer.domElement.style.width = '100%';
+    threeRenderer.domElement.style.height = isExpanded ? `${h}px` : '340px';
+  }
 }
 
 function toggle3DRotation() {
@@ -2473,11 +2490,24 @@ function toggle3DRotation() {
 function zoom3D(deltaZ) {
   if (!threeCamera) return;
   threeCamera.position.z = Math.max(6.5, Math.min(26, threeCamera.position.z + deltaZ));
+  const panel = document.getElementById('panel-3d-main');
+  if (panel) {
+    panel.classList.toggle('zoomed-3d', Math.abs(threeCamera.position.z - 14.2) > 0.5);
+  }
 }
 
 function reset3DView() {
   targetRotY = 0.0;
   targetRotX = 0.15;
+  const panel = document.getElementById('panel-3d-main');
+  if (panel) {
+    panel.classList.remove('expanded-3d', 'zoomed-3d');
+  }
+  const expandBtn = document.getElementById('btn-3d-expand');
+  if (expandBtn) {
+    expandBtn.textContent = '⛶ Phóng Rộng';
+    expandBtn.classList.remove('active');
+  }
   if (threeCamera) {
     threeCamera.position.set(0, 6.2, 13.8);
     threeCamera.lookAt(0, 1.8, 0);
@@ -2488,17 +2518,32 @@ function reset3DView() {
     btn.textContent = '▶️ Tự Xoay';
     btn.classList.remove('active');
   }
+  resize3DScene();
 }
 
-// Khôi phục bảng 3D về đúng trạng thái ban đầu (góc nhìn ban đầu, tự động xoay, thu phóng mặc định & vẽ lại cột 3D)
+// Khôi phục bảng 3D về đúng vị trí khung ban đầu (thoát phóng rộng, trả lại 3 bảng Dashboard song song, đặt lại cỡ thu phóng & góc xoay ban đầu)
 function refresh3DInitialState() {
   targetRotY = 0.0;
   targetRotX = 0.18;
   isDragging3D = false;
 
   const panel = document.getElementById('panel-3d-main');
-  if (panel && panel.classList.contains('expanded-3d')) {
-    panel.classList.remove('expanded-3d');
+  if (panel) {
+    panel.classList.remove('expanded-3d', 'zoomed-3d');
+    panel.style.width = '';
+    panel.style.height = '';
+  }
+
+  const expandBtn = document.getElementById('btn-3d-expand');
+  if (expandBtn) {
+    expandBtn.textContent = '⛶ Phóng Rộng';
+    expandBtn.classList.remove('active');
+  }
+
+  const container = document.getElementById('three-canvas-container');
+  if (container) {
+    container.style.width = '100%';
+    container.style.height = '340px';
   }
 
   if (threeCamera) {
@@ -2516,8 +2561,15 @@ function refresh3DInitialState() {
     btn.classList.add('active');
   }
 
+  resize3DScene();
   if (AppState.reconciled) {
     update3DScene(AppState.reconciled);
+  }
+  if (chartPrefixInstance && typeof chartPrefixInstance.resize === 'function') {
+    chartPrefixInstance.resize();
+  }
+  if (chartUsersInstance && typeof chartUsersInstance.resize === 'function') {
+    chartUsersInstance.resize();
   }
   setTimeout(resize3DScene, 40);
 }
@@ -2525,9 +2577,27 @@ function refresh3DInitialState() {
 function toggleExpand3DPanel() {
   const panel = document.getElementById('panel-3d-main');
   if (!panel) return;
-  panel.classList.toggle('expanded-3d');
-  setTimeout(resize3DScene, 60);
+  const isNowExpanded = panel.classList.toggle('expanded-3d');
+  const expandBtn = document.getElementById('btn-3d-expand');
+  if (expandBtn) {
+    expandBtn.textContent = isNowExpanded ? '🗗 Về Khung Đầu' : '⛶ Phóng Rộng';
+    expandBtn.classList.toggle('active', isNowExpanded);
+  }
+  if (!isNowExpanded) {
+    refresh3DInitialState();
+    return;
+  }
+  setTimeout(resize3DScene, 40);
 }
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const panel = document.getElementById('panel-3d-main');
+    if (panel && (panel.classList.contains('expanded-3d') || panel.classList.contains('zoomed-3d'))) {
+      refresh3DInitialState();
+    }
+  }
+});
 
 function update3DScene(r) {
   if (!threeBarsGroup) return;

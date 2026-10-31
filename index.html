@@ -327,19 +327,22 @@
         <div class="panel-header">
           <h3>🧊 Bảng 3D Động: Đối Soát Trực Tiếp Trên Cột (Kho 01, 61)</h3>
           <div class="three-controls-bar">
-            <button class="ctrl-btn-mini refresh-3d-btn" id="btn-3d-refresh" onclick="refresh3DInitialState()" title="Khôi phục bảng 3D về đúng trạng thái ban đầu (góc nhìn, tự động xoay & cột số liệu)">🔄 Refresh 3D</button>
+            <button class="ctrl-btn-mini refresh-3d-btn" id="btn-3d-refresh" onclick="refresh3DInitialState()" title="Trở về vị trí khung ban đầu (hiển thị lại đầy đủ 3 bảng Dashboard & đặt lại cỡ thu phóng 3D)">🔄 Refresh (Về Khung Ban Đầu)</button>
             <button class="ctrl-btn-mini active" id="btn-3d-pause" onclick="toggle3DRotation()" title="Dừng hoặc tiếp tục xoay 3D">⏸️ Dừng Xoay</button>
-            <button class="ctrl-btn-mini" onclick="zoom3D(-1.8)" title="Phóng to mô hình 3D">➕</button>
-            <button class="ctrl-btn-mini" onclick="zoom3D(1.8)" title="Thu nhỏ mô hình 3D">➖</button>
+            <button class="ctrl-btn-mini" onclick="zoom3D(-1.8)" title="Phóng to mô hình 3D">➕ Phóng To</button>
+            <button class="ctrl-btn-mini" onclick="zoom3D(1.8)" title="Thu nhỏ mô hình 3D">➖ Thu Nhỏ</button>
             <button class="ctrl-btn-mini" onclick="reset3DView()" title="Góc nhìn đứng đọc số liệu">🎯 Góc Chuẩn</button>
-            <button class="ctrl-btn-mini" onclick="toggleExpand3DPanel()" title="Phóng to toàn màn hình">⛶</button>
+            <button class="ctrl-btn-mini" id="btn-3d-expand" onclick="toggleExpand3DPanel()" title="Phóng rộng hoặc thu về khung ban đầu">⛶ Phóng Rộng</button>
           </div>
         </div>
         <div id="three-canvas-container">
+          <button type="button" class="floating-restore-3d-btn" id="btn-3d-floating-restore" onclick="refresh3DInitialState()" title="Thu bảng 3D về lại khung ban đầu để xem cả 3 bảng Dashboard">
+            🔄 Trở Về Khung Ban Đầu (Hiện Đủ 3 Bảng)
+          </button>
           <div class="three-legend">
             <span>🟢 Cột Xanh: SL Kiểm Được</span>
             <span>🔴 Cột Đỏ: SL Thiếu</span>
-            <span>🔄 Bấm Refresh 3D để về trạng thái ban đầu</span>
+            <span>🔄 Bấm <strong>Refresh (Về Khung Ban Đầu)</strong> khi phóng to để trở về khung gốc</span>
           </div>
         </div>
       </div>
