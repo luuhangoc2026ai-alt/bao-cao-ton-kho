@@ -119,24 +119,28 @@
         </div>
       </div>
 
-      <!-- BẢNG NGUỒN 2: FILE KIỂM KÊ / MÁY QUÉT PDA -->
+      <!-- BẢNG NGUỒN 2: FILE KIỂM KÊ / MÁY QUÉT PDA (HỖ TRỢ NHẬP THÊM FILE CỘNG DỒN & GHI LOG ĐẦY ĐỦ) -->
       <div class="source-box">
         <div class="source-header">
           <div class="source-title-wrap">
-            <h3>🔫 Bảng Nguồn 2: Dữ Liệu Quét Kiểm Kê (TagID / Batch)</h3>
-            <p id="scan-file-label">Đang nạp: kiêm kho 31.10.2026.xlsx (Quét PDA thực tế & đối soát)</p>
+            <h3>🔫 Bảng Nguồn 2: Dữ Liệu Quét Kiểm Kê & Cộng Dồn (TagID / Batch)</h3>
+            <p id="scan-file-label">Đang nạp: kiêm kho 31.10.2026.xlsx (Tự động cộng dồn khi nhập thêm file & quét PDA)</p>
           </div>
           <span class="source-status-badge" id="scan-status-badge">Đang hoạt động</span>
         </div>
 
-        <div class="source-metrics">
+        <div class="source-metrics source-metrics-4">
           <div class="sm-item">
-            <span>Tổng lượt quét PDA</span>
+            <span>Tổng dòng ghi Log (100%)</span>
             <strong id="sm-scan-raw">0</strong>
           </div>
           <div class="sm-item">
             <span>TagID duy nhất (Unique)</span>
             <strong id="sm-scan-unique">0</strong>
+          </div>
+          <div class="sm-item">
+            <span>Tổng SL Quét (Gồm kho khác)</span>
+            <strong id="sm-scan-total-qty" style="color: #34d399;">0</strong>
           </div>
           <div class="sm-item">
             <span>Cảnh báo trùng TagID</span>
@@ -145,8 +149,12 @@
         </div>
 
         <div class="source-actions">
+          <input type="file" id="input-file-scan-append" class="file-input-hidden" multiple accept=".xlsx,.xls,.csv,.tsv,.json,.txt,.xml" onchange="handleScanFileAppendUpload(event)" />
+          <button class="btn-3d btn-amber" id="btn-append-scan" onclick="document.getElementById('input-file-scan-append').click()" title="Nhập thêm 1 hoặc nhiều file kiểm kê để cộng dồn vào dữ liệu kiểm kê hiện tại">
+            <span>➕</span> Nhập Thêm File (Cộng Dồn)
+          </button>
           <input type="file" id="input-file-scan" class="file-input-hidden" accept=".xlsx,.xls,.csv,.tsv,.json,.txt,.xml" onchange="handleScanFileUpload(event)" />
-          <button class="btn-3d btn-primary" onclick="document.getElementById('input-file-scan').click()">
+          <button class="btn-3d btn-primary" onclick="document.getElementById('input-file-scan').click()" title="Thay thế bằng file kiểm kê mới">
             <span>📂</span> Nhập File Kiểm Kê Mới
           </button>
           <button class="btn-3d btn-emerald" onclick="openPdaModal()">
@@ -192,6 +200,7 @@
           <span id="kpi-stock-tags">0 TagID (Batch)</span>
           <strong id="kpi-stock-items">0 Mã hàng</strong>
         </div>
+        <div class="kpi-extra-note" id="kpi-stock-allwh-note">Toàn hệ thống: 0 SL</div>
         <div class="kpi-bar"><div class="kpi-bar-fill" id="bar-stock" style="width: 100%"></div></div>
       </div>
 
@@ -206,6 +215,7 @@
           <span id="kpi-scanned-tags">0 TagID khớp</span>
           <strong id="kpi-scanned-pct" style="color: #34d399;">0%</strong>
         </div>
+        <div class="kpi-extra-note" id="kpi-scanned-with-other" style="color: #6ee7b7;">+ Kho khác: 0 SL → Tổng: 0 SL</div>
         <div class="kpi-bar"><div class="kpi-bar-fill" id="bar-scanned" style="width: 0%"></div></div>
       </div>
 
@@ -220,6 +230,7 @@
           <span id="kpi-missing-tags">0 TagID thiếu</span>
           <strong id="kpi-missing-pct" style="color: #fb7185;">0%</strong>
         </div>
+        <div class="kpi-extra-note" id="kpi-missing-after-other" style="color: #fda4af;">Đối soát gồm kho khác: -0 SL</div>
         <div class="kpi-bar"><div class="kpi-bar-fill" id="bar-missing" style="width: 0%"></div></div>
       </div>
 
@@ -234,6 +245,7 @@
           <span id="kpi-dup-extra">0 lượt quét dư</span>
           <strong id="kpi-dup-prevented" style="color: #fbbf24;">Chặn +0 SL ảo</strong>
         </div>
+        <div class="kpi-extra-note">Tự động khử trùng lặp khi cộng dồn</div>
         <div class="kpi-bar"><div class="kpi-bar-fill" id="bar-dup" style="width: 0%"></div></div>
       </div>
 
@@ -248,20 +260,22 @@
           <span>TagID khác vị trí sổ</span>
           <strong id="kpi-loc-pct">0% Tag khớp</strong>
         </div>
+        <div class="kpi-extra-note">Tag khớp sổ nhưng khác vị trí BIN</div>
         <div class="kpi-bar"><div class="kpi-bar-fill" id="bar-loc" style="width: 0%"></div></div>
       </div>
 
-      <!-- KPI 6: TAG NGOÀI PHẠM VI / LẠ -->
+      <!-- KPI 6: TỔNG HỢP SỐ LƯỢNG QUÉT ĐƯỢC TAG NHƯNG ĐANG Ở KHO KHÁC -->
       <div class="kpi-card-3d" data-tilt onclick="switchTab('tab-unmatched')" style="cursor: pointer;">
         <div class="kpi-top">
-          <span class="kpi-label">6. Tag Ngoài Phạm Vi / Lạ</span>
-          <div class="kpi-icon">🔍</div>
+          <span class="kpi-label">6. SL Quét Được Ở Kho Khác</span>
+          <div class="kpi-icon">🏢</div>
         </div>
-        <div class="kpi-value" id="kpi-out-tags">0</div>
+        <div class="kpi-value" id="kpi-out-tags" style="color: #c084fc;">0</div>
         <div class="kpi-sub">
-          <span id="kpi-out-other">0 kho khác</span>
-          <strong id="kpi-out-unknown">0 chưa có sổ</strong>
+          <span id="kpi-out-other">0 Tag kho khác</span>
+          <strong id="kpi-out-unknown" style="color: #f43f5e;">0 chưa có sổ</strong>
         </div>
+        <div class="kpi-extra-note" id="kpi-out-total-note" style="color: #d8b4fe;">Cộng toàn bộ ngoại lệ: 0 SL</div>
         <div class="kpi-bar"><div class="kpi-bar-fill" id="bar-out" style="width: 0%"></div></div>
       </div>
     </section>
@@ -319,8 +333,8 @@
     <!-- EXECUTIVE SUMMARY MATRIX FOR MANAGEMENT -->
     <section class="panel-3d exec-summary-section">
       <div class="panel-header">
-        <h3>📋 BẢNG TỔNG QUAN BÁO CÁO LÃNH ĐẠO (THEO KHO 01, 61 & NHÓM MÃ 3*, 5*, 7*)</h3>
-        <span class="panel-badge">Tự động quy đổi TagID quét PDA → Số lượng tồn kho chính xác</span>
+        <h3>📋 BẢNG TỔNG QUAN BÁO CÁO LÃNH ĐẠO (THEO KHO 01, 61 & NHÓM MÃ 3*, 5*, 7* + ĐỐI SOÁT TAG QUÉT Ở KHO KHÁC)</h3>
+        <span class="panel-badge">Tự động cộng dồn & quy đổi TagID quét PDA (kể cả Tag ở kho khác) → Đối soát Tổng Tồn Kho</span>
       </div>
       <div class="table-wrap">
         <table class="data-table" id="exec-matrix-table">
@@ -330,12 +344,16 @@
               <th>Nhóm Mã Hàng</th>
               <th class="num-col">Số Mã Hàng</th>
               <th class="num-col">Tổng Tag Tồn</th>
-              <th class="num-col">Tag Kiểm Được</th>
-              <th class="num-col">Tag Thiếu</th>
+              <th class="num-col">Tag Kiểm (01/61)</th>
+              <th class="num-col">Tag Thiếu (01/61)</th>
               <th class="num-col">Tỷ Lệ Tag (%)</th>
               <th class="num-col">Tổng SL Tồn Kho</th>
-              <th class="num-col" style="color:#34d399;">SL Kiểm Được (Khớp Tag)</th>
-              <th class="num-col" style="color:#fb7185;">SL Thiếu So Với Tồn</th>
+              <th class="num-col" style="color:#34d399;">SL Kiểm (Kho 01/61)</th>
+              <th class="num-col" style="color:#fb7185;">SL Thiếu (01/61)</th>
+              <th class="num-col" style="color:#c084fc;">Tag Quét Kho Khác</th>
+              <th class="num-col" style="color:#c084fc;">SL Quét Ở Kho Khác</th>
+              <th class="num-col" style="color:#38bdf8;">Tổng SL Quét (Gồm Kho Khác)</th>
+              <th class="num-col" style="color:#fda4af;">Chênh Lệch Tồn (Sau Cộng Kho Khác)</th>
               <th class="num-col">Tỷ Lệ Đạt SL (%)</th>
               <th>Đánh Giá</th>
             </tr>
@@ -358,10 +376,10 @@
           🔁 3. Cảnh Báo Trùng TagID <span class="tab-count" id="count-tab-duplicates">0</span>
         </button>
         <button class="tab-btn" data-tab="tab-unmatched" onclick="switchTab('tab-unmatched')">
-          🔍 4. TagID Ngoài Phạm Vi / Chưa Có Sổ <span class="tab-count" id="count-tab-unmatched">0</span>
+          🏢 4. Tổng Hợp Tag Quét Ở Kho Khác & Đối Soát Tồn Kho <span class="tab-count" id="count-tab-unmatched">0</span>
         </button>
         <button class="tab-btn" data-tab="tab-pda-log" onclick="switchTab('tab-pda-log')">
-          🔫 5. Bảng Dữ Liệu Quét PDA (Có Sửa/Xóa) <span class="tab-count" id="count-tab-pda-log">0</span>
+          🔫 5. Bảng Ghi Log Quét PDA & Cộng Dồn (Đầy Đủ 100%) <span class="tab-count" id="count-tab-pda-log">0</span>
         </button>
       </div>
 
@@ -371,10 +389,11 @@
           <button class="chip-btn active" onclick="setStatusFilter('ALL', this)">Tất cả trạng thái</button>
           <button class="chip-btn" onclick="setStatusFilter('MISSING', this)">⚠️ Có Thiếu Hụt (Chưa Quét)</button>
           <button class="chip-btn" onclick="setStatusFilter('COMPLETE', this)">✅ Đã Kiểm Đủ 100%</button>
+          <button class="chip-btn" onclick="setStatusFilter('OTHER_WH', this)">🏢 Có Tag Quét Ở Kho Khác</button>
           <button class="chip-btn" onclick="setStatusFilter('DUP', this)">🔁 Trùng TagID</button>
           <button class="chip-btn" onclick="setStatusFilter('LOC_DIFF', this)">📍 Lệch Vị Trí BIN</button>
         </div>
-        <div style="font-size:0.78rem; color:#94a3b8;" id="table-showing-info">Hiển thị dữ liệu đối soát</div>
+        <div style="font-size:0.78rem; color:#94a3b8;" id="table-showing-info">Hiển thị đầy đủ 100% dữ liệu đối soát</div>
       </div>
 
       <!-- TAB 1: BY ITEM CODE -->
@@ -390,9 +409,13 @@
                 <th class="num-col">Tổng Tag Tồn</th>
                 <th class="num-col">Tag Đã Quét</th>
                 <th class="num-col">Tag Thiếu</th>
-                <th class="num-col">SL Tồn Kho</th>
-                <th class="num-col" style="color:#34d399;">SL Kiểm Được</th>
-                <th class="num-col" style="color:#fb7185;">SL Thiếu</th>
+                <th class="num-col">SL Tồn Kho (01/61)</th>
+                <th class="num-col" style="color:#34d399;">SL Kiểm (01/61)</th>
+                <th class="num-col" style="color:#fb7185;">SL Thiếu (01/61)</th>
+                <th class="num-col" style="color:#c084fc;">Tag Quét Kho Khác</th>
+                <th class="num-col" style="color:#c084fc;">SL Quét Ở Kho Khác</th>
+                <th class="num-col" style="color:#38bdf8;">Tổng SL Quét (Gồm Kho Khác)</th>
+                <th class="num-col" style="color:#fda4af;">Chênh Lệch Tồn (Gồm Kho Khác)</th>
                 <th class="num-col">% Đạt SL</th>
                 <th>Vị Trí Sổ (BIN)</th>
                 <th>Vị Trí Quét Thực Tế</th>
@@ -453,28 +476,105 @@
         </div>
       </div>
 
-      <!-- TAB 4: UNMATCHED / OUT OF SCOPE TAGS -->
+      <!-- TAB 4: OTHER WAREHOUSE SCANNED TAGS SUMMARY & UNMATCHED TAGS -->
       <div id="tab-unmatched" class="tab-pane" style="display:none;">
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>STT</th>
-                <th>TagID Quét PDA</th>
-                <th>Vị Trí Quét</th>
-                <th>User Quét</th>
-                <th>Thời Gian Quét</th>
-                <th>Phân Loại Ngoại Lệ</th>
-                <th>Thông Tin Tìm Thấy Ở Kho/Mã Khác (Nếu Có)</th>
-              </tr>
-            </thead>
-            <tbody id="tbody-unmatched"></tbody>
-          </table>
+        <!-- Tổng hợp đối soát số lượng có quét được Tag nhưng đang ở kho khác -->
+        <div id="other-wh-reconciliation-box" style="margin-bottom: 18px;"></div>
+
+        <div style="display:grid; grid-template-columns: 1fr; gap: 18px;">
+          <!-- Bảng 4.1: Tổng hợp theo từng Kho khác trên sổ tồn kho -->
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <h4 style="color:#e2e8f0; font-size:0.9rem;">🏢 4.1. Tổng Hợp Số Lượng Quét Được Tag Nhưng Đang Ở Kho Khác (Theo Kho Trên Sổ Tồn)</h4>
+              <span class="panel-badge">Đối soát với Tổng Tồn Kho</span>
+            </div>
+            <div class="table-wrap" style="max-height: 280px;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Kho Trên Sổ (WH)</th>
+                    <th>Phân Loại Nhóm</th>
+                    <th class="num-col">Số Mã Hàng</th>
+                    <th class="num-col" style="color:#c084fc;">Số Tag Quét Được</th>
+                    <th class="num-col" style="color:#c084fc;">Tổng SL Quét Được Ở Kho Này</th>
+                    <th class="num-col">Tổng SL Tồn Kho 01 & 61 (Của Các Mã Này)</th>
+                    <th class="num-col" style="color:#34d399;">SL Đã Quét Tại Kho 01 & 61 (Của Các Mã Này)</th>
+                    <th class="num-col" style="color:#38bdf8;">Tổng SL Đã Quét (01/61 + Kho Này)</th>
+                    <th class="num-col">Tổng Tồn Toàn Hệ Thống (Của Các Mã Này)</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-other-wh-summary"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Bảng 4.2: Tổng hợp theo từng Mã hàng có Tag quét được nhưng đang ở kho khác để đối soát tổng tồn kho -->
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <h4 style="color:#e2e8f0; font-size:0.9rem;">📦 4.2. Tổng Hợp Theo Mã Hàng Có Quét Được Tag Ở Kho Khác Để Đối Soát Với Số Tổng Tồn Kho</h4>
+              <span class="panel-badge" id="badge-other-wh-items-count">0 mã hàng</span>
+            </div>
+            <div class="table-wrap" style="max-height: 400px;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>STT</th>
+                    <th>Mã Hàng (Stock Code)</th>
+                    <th>Nhóm</th>
+                    <th>Kho Khác Trên Sổ</th>
+                    <th class="num-col" style="color:#c084fc;">Số Tag Quét Ở Kho Khác</th>
+                    <th class="num-col" style="color:#c084fc;">SL Quét Ở Kho Khác</th>
+                    <th class="num-col">SL Tồn Kho (01 & 61)</th>
+                    <th class="num-col" style="color:#34d399;">SL Kiểm (01 & 61)</th>
+                    <th class="num-col" style="color:#fb7185;">SL Thiếu (01 & 61)</th>
+                    <th class="num-col" style="color:#38bdf8;">Tổng SL Quét (01/61 + Kho Khác)</th>
+                    <th class="num-col" style="color:#fda4af;">Chênh Lệch So Với Tồn (01 & 61)</th>
+                    <th class="num-col">Tổng Tồn Toàn Kho (Gồm Kho Khác)</th>
+                    <th class="num-col">Chênh Lệch So Với Tổng Tồn Toàn Kho</th>
+                    <th>Chi Tiết TagID Ở Kho Khác</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-other-wh-items"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Bảng 4.3: Chi tiết từng TagID quét PDA đang ở kho khác / chưa có sổ -->
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <h4 style="color:#e2e8f0; font-size:0.9rem;">🏷️ 4.3. Chi Tiết Từng TagID Quét Được Đang Ở Kho Khác / Chưa Có Trên Sổ</h4>
+              <span class="panel-badge" id="badge-unmatched-tags-count">0 TagID</span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>STT</th>
+                    <th>TagID Quét PDA</th>
+                    <th>Kho Trên Sổ</th>
+                    <th>Mã Hàng Trên Sổ</th>
+                    <th class="num-col" style="color:#c084fc;">Số Lượng (SL)</th>
+                    <th>BIN Trên Sổ</th>
+                    <th>Vị Trí Quét Thực Tế</th>
+                    <th>User Quét</th>
+                    <th>Thời Gian Quét</th>
+                    <th>Phân Loại Ngoại Lệ</th>
+                    <th>Ghi Chú Đối Soát</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-unmatched"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- TAB 5: LIVE PDA SCAN TABLE (NEWEST ON TOP + EDIT/DELETE) -->
+      <!-- TAB 5: LIVE PDA SCAN TABLE (NEWEST ON TOP + EDIT/DELETE + UNLIMITED LOG) -->
       <div id="tab-pda-log" class="tab-pane" style="display:none;">
+        <div id="pda-log-status-banner" style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:10px; padding:10px 14px; margin-bottom:10px; border-radius:10px; background:rgba(16, 185, 129, 0.12); border:1px solid rgba(16, 185, 129, 0.35); font-size:0.8rem; color:#e2e8f0;">
+          <span>✅ <strong>Chế độ Ghi Log Toàn Phần (Không Giới Hạn Dữ Liệu):</strong> Mọi lượt quét PDA và mọi file nhập thêm đều được ghi log đầy đủ 100% và tự động cộng dồn đối soát tồn kho tức thời.</span>
+          <strong id="pda-log-total-indicator" style="color:#34d399;">Đang chứa: 0 / 0 dòng log</strong>
+        </div>
         <div class="table-wrap">
           <table class="data-table">
             <thead>
@@ -485,8 +585,9 @@
                 <th>Bin Location</th>
                 <th>USE</th>
                 <th class="num-col">Qty</th>
-                <th>Mã Hàng Khớp</th>
+                <th>Mã Hàng & Kho Khớp</th>
                 <th>Thời Gian</th>
+                <th>Nguồn Dữ Liệu</th>
                 <th>Trạng Thái</th>
               </tr>
             </thead>
@@ -509,6 +610,7 @@
       <div class="zebra-header">
         <span>📡 ZEBRA PDA SCANNER</span>
         <div style="display:flex; gap:6px; align-items:center;">
+          <button class="zebra-btn-xs" onclick="document.getElementById('input-file-scan-append').click()" title="Nhập thêm file kiểm kê cộng dồn">➕ Cộng file</button>
           <button class="zebra-btn-xs" onclick="fillSampleUnscannedTag()" title="Điền thử 1 Tag chưa quét">⚡ Test</button>
           <button class="zebra-btn-xs" onclick="exportPdaScansOnly()" title="Xuất file Excel bảng quét">💾 Excel</button>
           <button class="zebra-close-btn" onclick="closePdaModal()">✖ ĐÓNG</button>

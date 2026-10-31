@@ -318,6 +318,10 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.source-metrics.source-metrics-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
 .sm-item span {
   display: block;
   font-size: 0.71rem;
@@ -504,6 +508,50 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.kpi-extra-note {
+  font-size: 0.71rem;
+  color: #94a3b8;
+  margin-top: 5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.other-wh-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.other-wh-summary-card {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(192, 132, 252, 0.35);
+  border-radius: 12px;
+  padding: 12px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.other-wh-summary-card span.ow-title {
+  font-size: 0.73rem;
+  font-weight: 700;
+  color: #cbd5e1;
+  text-transform: uppercase;
+}
+
+.other-wh-summary-card strong.ow-val {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #c084fc;
+}
+
+.other-wh-summary-card p.ow-sub {
+  font-size: 0.74rem;
+  color: #94a3b8;
 }
 
 .kpi-bar {

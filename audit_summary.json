@@ -1022,5 +1022,15 @@
         "090401"
       ]
     }
-  ]
+  ],
+  "other_wh_scanned_same_prefix_tags": 30,
+  "other_wh_scanned_same_prefix_qty": 79212,
+  "other_scope_scanned_other_prefix_tags": 5,
+  "other_scope_scanned_other_prefix_qty": 37000,
+  "total_other_wh_and_prefix_scanned_tags": 35,
+  "total_other_wh_and_prefix_scanned_qty": 116212,
+  "reconciled_scanned_qty_including_other_wh": 33539451,
+  "reconciled_missing_qty_after_other_wh": 2234814,
+  "reconciled_scanned_qty_including_all_matched": 33576451,
+  "reconciled_missing_qty_after_all_matched": 2197814
 }
