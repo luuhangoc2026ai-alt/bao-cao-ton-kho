@@ -658,9 +658,23 @@ body {
 }
 
 /* 3D Visualization & Executive Charts Section */
+.three-expanded-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 6, 12, 0.85);
+  backdrop-filter: blur(6px);
+  z-index: 1990;
+  display: none;
+  cursor: pointer;
+}
+
+.three-expanded-backdrop.open {
+  display: block;
+}
+
 .visuals-grid {
   display: grid;
-  grid-template-columns: 1.35fr 1fr 0.85fr;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 0.85fr);
   gap: 18px;
   margin-bottom: 26px;
   align-items: stretch;
@@ -684,51 +698,76 @@ body {
 }
 
 .panel-3d.expanded-3d {
-  position: fixed;
-  inset: 20px;
-  z-index: 950;
+  position: fixed !important;
+  top: 24px !important;
+  left: 24px !important;
+  right: 24px !important;
+  bottom: 24px !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: calc(100vw - 48px) !important;
+  max-height: calc(100vh - 48px) !important;
+  z-index: 2000 !important;
   background: rgba(7, 11, 20, 0.98);
   border: 2px solid #38bdf8;
-  box-shadow: 0 0 0 9999px rgba(3, 6, 12, 0.82), 0 25px 60px rgba(0, 0, 0, 0.95);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.95);
 }
 
 .panel-3d.expanded-3d #three-canvas-container,
 .panel-3d.expanded-3d .chart-box {
-  height: calc(100vh - 150px) !important;
+  flex: 1 1 auto !important;
+  height: calc(100vh - 140px) !important;
+  width: 100% !important;
 }
 
 .panel-3d:not(.expanded-3d) #three-canvas-container {
   width: 100% !important;
   height: 340px !important;
+  max-height: 340px !important;
+  flex: 0 0 340px !important;
 }
 
 #three-canvas-container canvas {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
   width: 100% !important;
+  height: 100% !important;
   max-width: 100% !important;
-  display: block;
+  max-height: 100% !important;
+  display: block !important;
+  z-index: 1;
 }
 
-.panel-3d:not(.expanded-3d) #three-canvas-container canvas {
-  height: 340px !important;
+.ctrl-btn-mini.close-expand-3d-btn {
+  display: none;
+  background: linear-gradient(135deg, #e11d48, #f43f5e);
+  border-color: #fda4af;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.panel-3d.expanded-3d .ctrl-btn-mini.close-expand-3d-btn {
+  display: inline-flex;
 }
 
 .floating-restore-3d-btn {
   position: absolute;
   top: 10px;
   right: 10px;
-  z-index: 20;
+  z-index: 30;
   display: none;
   align-items: center;
   gap: 6px;
-  padding: 7px 14px;
+  padding: 8px 15px;
   border-radius: 9px;
   border: 1.5px solid #38bdf8;
   background: linear-gradient(135deg, #0284c7, #2563eb);
   color: #ffffff;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 800;
   cursor: pointer;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.75), 0 0 14px rgba(56, 189, 248, 0.55);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.85), 0 0 14px rgba(56, 189, 248, 0.55);
 }
 
 .floating-restore-3d-btn:hover {
@@ -742,6 +781,8 @@ body {
 }
 
 .panel-header {
+  position: relative;
+  z-index: 30;
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -820,6 +861,7 @@ body {
   bottom: 8px;
   left: 10px;
   right: 10px;
+  z-index: 25;
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;

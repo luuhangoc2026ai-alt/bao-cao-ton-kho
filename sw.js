@@ -1,4 +1,4 @@
-const CACHE_NAME = 'inv-3d-pda-cache-v3';
+const CACHE_NAME = 'inv-3d-pda-cache-v4';
 const OFFLINE_ASSETS = [
   './',
   './index.html',
@@ -9,7 +9,7 @@ const OFFLINE_ASSETS = [
   './audit_summary.json',
   'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
   'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js',
-  'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'
+  'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js'
 ];
 
 self.addEventListener('install', (event) => {
@@ -28,20 +28,18 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Network-First strategy: Always fetch latest code when online; fallback to cache only when offline
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const networkFetch = fetch(event.request)
-        .then((response) => {
-          if (response && response.status === 200) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
-          }
-          return response;
-        })
-        .catch(() => cached);
-      return cached || networkFetch;
-    })
+    fetch(event.request)
+      .then((response) => {
+        if (response && response.status === 200) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
+        }
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });

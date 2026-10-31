@@ -2460,21 +2460,22 @@ function resize3DScene() {
 
   const isExpanded = Boolean(panel && panel.classList.contains('expanded-3d'));
   if (!isExpanded && threeRenderer.domElement) {
-    // Clear any fixed pixel dimensions from fullscreen mode so CSS Grid column shrinks back to its original 1.35fr track
+    // Shrink WebGL drawing buffer first so intrinsic canvas attributes never hold the grid column wide
+    threeRenderer.setSize(1, 1, false);
     threeRenderer.domElement.style.width = '100%';
-    threeRenderer.domElement.style.height = '340px';
+    threeRenderer.domElement.style.height = '100%';
     container.style.width = '100%';
     container.style.height = '340px';
   }
 
-  const w = container.clientWidth || 520;
-  const h = isExpanded ? (container.clientHeight || 620) : 340;
+  const w = Math.max(container.clientWidth || 520, 280);
+  const h = isExpanded ? Math.max(container.clientHeight || 620, 420) : 340;
   threeCamera.aspect = w / h;
   threeCamera.updateProjectionMatrix();
   threeRenderer.setSize(w, h, false);
   if (threeRenderer.domElement) {
     threeRenderer.domElement.style.width = '100%';
-    threeRenderer.domElement.style.height = isExpanded ? `${h}px` : '340px';
+    threeRenderer.domElement.style.height = '100%';
   }
 }
 
@@ -2502,6 +2503,12 @@ function reset3DView() {
   const panel = document.getElementById('panel-3d-main');
   if (panel) {
     panel.classList.remove('expanded-3d', 'zoomed-3d');
+    panel.style.width = '';
+    panel.style.height = '';
+  }
+  const backdrop = document.getElementById('three-expanded-backdrop');
+  if (backdrop) {
+    backdrop.classList.remove('open');
   }
   const expandBtn = document.getElementById('btn-3d-expand');
   if (expandBtn) {
@@ -2532,6 +2539,11 @@ function refresh3DInitialState() {
     panel.classList.remove('expanded-3d', 'zoomed-3d');
     panel.style.width = '';
     panel.style.height = '';
+  }
+
+  const backdrop = document.getElementById('three-expanded-backdrop');
+  if (backdrop) {
+    backdrop.classList.remove('open');
   }
 
   const expandBtn = document.getElementById('btn-3d-expand');
@@ -2571,23 +2583,30 @@ function refresh3DInitialState() {
   if (chartUsersInstance && typeof chartUsersInstance.resize === 'function') {
     chartUsersInstance.resize();
   }
-  setTimeout(resize3DScene, 40);
+  setTimeout(resize3DScene, 30);
 }
 
 function toggleExpand3DPanel() {
   const panel = document.getElementById('panel-3d-main');
   if (!panel) return;
-  const isNowExpanded = panel.classList.toggle('expanded-3d');
-  const expandBtn = document.getElementById('btn-3d-expand');
-  if (expandBtn) {
-    expandBtn.textContent = isNowExpanded ? '🗗 Về Khung Đầu' : '⛶ Phóng Rộng';
-    expandBtn.classList.toggle('active', isNowExpanded);
-  }
-  if (!isNowExpanded) {
+  const wasExpanded = panel.classList.contains('expanded-3d');
+  if (wasExpanded) {
     refresh3DInitialState();
     return;
   }
-  setTimeout(resize3DScene, 40);
+
+  panel.classList.add('expanded-3d');
+  const backdrop = document.getElementById('three-expanded-backdrop');
+  if (backdrop) {
+    backdrop.classList.add('open');
+  }
+  const expandBtn = document.getElementById('btn-3d-expand');
+  if (expandBtn) {
+    expandBtn.textContent = '🗗 Về Khung Đầu';
+    expandBtn.classList.add('active');
+  }
+  resize3DScene();
+  setTimeout(resize3DScene, 30);
 }
 
 window.addEventListener('keydown', (e) => {
@@ -3037,7 +3056,12 @@ if (pdaBroadcastChannel) {
 
 window.addEventListener('DOMContentLoaded', () => {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker
+      .register('./sw.js?v=20261031-4')
+      .then((reg) => {
+        if (reg && typeof reg.update === 'function') reg.update();
+      })
+      .catch(() => {});
   }
   init3DScene();
   loadInitialBundle();
