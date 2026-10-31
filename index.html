@@ -35,7 +35,7 @@
 
       <div class="header-actions">
         <button class="btn-3d btn-emerald" id="btn-open-pda" onclick="openPdaModal()">
-          <span>📱</span> Máy Quét PDA (Nhập Trực Tiếp)
+          <span>📱</span> Máy Quét PDA Zebra
         </button>
         <button class="btn-3d btn-primary" id="btn-export-excel" onclick="exportFullExcelReport()">
           <span>📥</span> Xuất Excel Báo Cáo (5 Sheet)
@@ -150,7 +150,7 @@
             <span>📂</span> Nhập File Kiểm Kê Mới
           </button>
           <button class="btn-3d btn-emerald" onclick="openPdaModal()">
-            <span>📱</span> Mở Máy Quét PDA (Bảng Nổi)
+            <span>📱</span> Mở Máy Quét PDA Zebra
           </button>
           <button class="btn-3d btn-rose" onclick="clearScanData()">
             <span>🗑️</span> Xóa Dữ Liệu Cũ (Kiểm Kê)
@@ -266,39 +266,49 @@
       </div>
     </section>
 
-    <!-- 3D WAREHOUSE VISUALIZATION & INTERACTIVE EXECUTIVE CHARTS -->
+    <!-- 3D WAREHOUSE VISUALIZATION (WITH DIRECT DATA LABELS, PAUSE, ZOOM, LINE/BAR SWITCH) -->
     <section class="visuals-grid">
-      <!-- 3D WebGL Interactive Chart -->
-      <div class="panel-3d">
+      <!-- Panel 1: 3D Dynamic Column with Full Data Labels + Pause/Zoom/Expand -->
+      <div class="panel-3d" id="panel-3d-main">
         <div class="panel-header">
-          <h3>🧊 Mô Hình 3D Đối Soát Kho (01 & 61) Theo Nhóm Mã (3*, 5*, 7*)</h3>
-          <span class="panel-badge">Kéo chuột để xoay 3D</span>
+          <h3>🧊 Bảng 3D Động: Số Liệu Trực Tiếp Trên Cột (Kho 01, 61)</h3>
+          <div class="three-controls-bar">
+            <button class="ctrl-btn-mini active" id="btn-3d-pause" onclick="toggle3DRotation()" title="Dừng hoặc tiếp tục xoay 3D">⏸️ Dừng Xoay</button>
+            <button class="ctrl-btn-mini" onclick="zoom3D(-1.8)" title="Phóng to mô hình 3D">➕ Phóng To</button>
+            <button class="ctrl-btn-mini" onclick="zoom3D(1.8)" title="Thu nhỏ mô hình 3D">➖ Thu Nhỏ</button>
+            <button class="ctrl-btn-mini" onclick="reset3DView()" title="Đặt lại góc nhìn chuẩn dễ đọc số liệu">🔄 Chuẩn</button>
+            <button class="ctrl-btn-mini" onclick="toggleExpand3DPanel()" title="Phóng to toàn màn hình">⛶ Phóng Rộng</button>
+          </div>
         </div>
         <div id="three-canvas-container">
           <div class="three-legend">
             <span>🟢 Cột Xanh: SL Kiểm Được</span>
             <span>🔴 Cột Đỏ: SL Thiếu</span>
-            <span>🖱️ Giữ chuột trái xoay góc nhìn</span>
+            <span>🖱️ Kéo chuột xoay | Lăn chuột Phóng to/Thu nhỏ</span>
           </div>
         </div>
       </div>
 
-      <!-- Chart 1: Comparison by Prefix & Warehouse -->
+      <!-- Panel 2: Combo Bar + Line Chart (with toggle between Bar+Line, Line Only, Bar Only) -->
       <div class="panel-3d">
         <div class="panel-header">
-          <h3>📊 Đối Soát Số Lượng Kiểm Được vs Thiếu Theo Nhóm Hàng</h3>
-          <span class="panel-badge">Đơn vị: Số lượng (Qty)</span>
+          <h3>📈 Biểu Đồ Cột & Đường Xu Hướng Đối Soát</h3>
+          <div class="three-controls-bar">
+            <button class="ctrl-btn-mini active" id="btn-chart-combo" onclick="setMainChartMode('combo')">📊+📈 Cột & Đường</button>
+            <button class="ctrl-btn-mini" id="btn-chart-line" onclick="setMainChartMode('line')">📈 Biểu Đồ Đường</button>
+            <button class="ctrl-btn-mini" id="btn-chart-bar" onclick="setMainChartMode('bar')">📊 Biểu Đồ Cột</button>
+          </div>
         </div>
         <div class="chart-box">
           <canvas id="chart-prefix"></canvas>
         </div>
       </div>
 
-      <!-- Chart 2: Completion & User Scan Breakdown -->
+      <!-- Panel 3: Completion & User Scan Breakdown -->
       <div class="panel-3d">
         <div class="panel-header">
-          <h3>👥 Hiệu Suất Quét PDA Theo Nhân Sự & Tỷ Lệ Khớp</h3>
-          <span class="panel-badge">Lượt quét PDA</span>
+          <h3>👥 Sản Lượng Quét PDA Theo Nhân Sự</h3>
+          <span class="panel-badge">Lượt quét thực tế</span>
         </div>
         <div class="chart-box">
           <canvas id="chart-users"></canvas>
@@ -306,7 +316,7 @@
       </div>
     </section>
 
-    <!-- EXECUTIVE SUMMARY MATRIX FOR MANAGEMENT (NGẮN GỌN, DỄ NHÌN CHO CẤP TRÊN) -->
+    <!-- EXECUTIVE SUMMARY MATRIX FOR MANAGEMENT -->
     <section class="panel-3d exec-summary-section">
       <div class="panel-header">
         <h3>📋 BẢNG TỔNG QUAN BÁO CÁO LÃNH ĐẠO (THEO KHO 01, 61 & NHÓM MÃ 3*, 5*, 7*)</h3>
@@ -351,7 +361,7 @@
           🔍 4. TagID Ngoài Phạm Vi / Chưa Có Sổ <span class="tab-count" id="count-tab-unmatched">0</span>
         </button>
         <button class="tab-btn" data-tab="tab-pda-log" onclick="switchTab('tab-pda-log')">
-          🔫 5. Bảng Dữ Liệu Quét PDA (Mới Nhất Trên Cùng) <span class="tab-count" id="count-tab-pda-log">0</span>
+          🔫 5. Bảng Dữ Liệu Quét PDA (Có Sửa/Xóa) <span class="tab-count" id="count-tab-pda-log">0</span>
         </button>
       </div>
 
@@ -463,20 +473,20 @@
         </div>
       </div>
 
-      <!-- TAB 5: LIVE PDA SCAN TABLE (NEWEST ON TOP) -->
+      <!-- TAB 5: LIVE PDA SCAN TABLE (NEWEST ON TOP + EDIT/DELETE) -->
       <div id="tab-pda-log" class="tab-pane" style="display:none;">
         <div class="table-wrap">
           <table class="data-table">
             <thead>
               <tr>
-                <th>Thứ Tự Bảng</th>
-                <th>STT Gốc</th>
+                <th>Dòng</th>
+                <th>Thao Tác</th>
                 <th>Tag ID (Batch)</th>
-                <th>Vị Trí Quét</th>
-                <th>User Quét (USE)</th>
-                <th>Thời Gian Quét</th>
-                <th>Mã Hàng Khớp (Kho 01/61)</th>
-                <th class="num-col">Số Lượng Quy Đổi</th>
+                <th>Bin Location</th>
+                <th>USE</th>
+                <th class="num-col">Qty</th>
+                <th>Mã Hàng Khớp</th>
+                <th>Thời Gian</th>
                 <th>Trạng Thái</th>
               </tr>
             </thead>
@@ -488,111 +498,76 @@
   </div>
 
   <!-- ========================================================================
-       BẢNG NỔI MÁY QUÉT MÃ VẠCH PDA (FLOATING PDA BARCODE SCANNER MODAL)
-       Giao diện chuẩn súng PDA: Nhập USER -> Ô Vị trí -> Ô TagID -> Ô Số lượng -> OK
-       Khi bấm OK: Ghi nhận ngay lên dòng trên cùng (Top 1) và đối soát tức thì!
+       ZEBRA PDA COMPACT SCANNER MODAL (CHUẨN MÀN HÌNH NHỎ MÁY PDA ZEBRA)
+       - Phần Quét ở TRÊN: USE, Bin Location, TagID, Qty, OK (Ngắn gọn, rõ ràng)
+       - Phần Log Tag Quét ở DƯỚI: Dòng mới nhất trên cùng + Nút Sửa (✏️) / Xóa (🗑️) ngay dòng vừa quét
        ======================================================================== -->
   <div class="pda-modal-overlay" id="pda-modal-overlay">
-    <div class="pda-device-wrapper">
-      <!-- Left: Industrial PDA Handheld Scanner -->
-      <div class="pda-handheld">
-        <div class="pda-laser-bar"></div>
-        <div class="pda-top-status">
-          <span>📡 PDA SCANNER PRO v4.0</span>
-          <span id="pda-clock">31/10/2026</span>
-          <span style="color:#34d399;">● ONLINE</span>
-        </div>
+    <div class="zebra-pda-unit">
+      <div class="zebra-laser-strip"></div>
 
-        <div class="pda-screen">
-          <!-- Step 1: USER (Tên người dùng USE) -->
-          <div class="pda-user-box">
-            <div class="pda-field-label">
-              <span>👤 1. Tên Người Dùng (USER / USE)</span>
-              <span style="font-size:0.68rem; color:#93c5fd;">Bắt buộc</span>
-            </div>
-            <input type="text" id="pda-input-user" class="pda-input" placeholder="Nhập tên User (VD: Thanh, Nam, Luu...)" value="Thanh" onkeydown="handlePdaKeydown(event, 'pda-input-loc')" />
-          </div>
-
-          <!-- Step 2: Ô Quét Vị Trí (Xuống dưới) -->
-          <div>
-            <div class="pda-field-label">
-              <span>📍 2. Ô Quét Vị Trí (BIN / Location)</span>
-              <span style="font-size:0.68rem; color:#94a3b8;">Enter ↓ xuống TagID</span>
-            </div>
-            <input type="text" id="pda-input-loc" class="pda-input" placeholder="Quét hoặc nhập Vị trí (VD: 140403)..." onkeydown="handlePdaKeydown(event, 'pda-input-tag')" />
-          </div>
-
-          <!-- Step 3: Ô Quét TagID (Xuống dưới) -->
-          <div>
-            <div class="pda-field-label">
-              <span>🏷️ 3. Ô Quét TagID (Batch)</span>
-              <span style="font-size:0.68rem; color:#94a3b8;">Enter ↓ xuống Số lượng</span>
-            </div>
-            <input type="text" id="pda-input-tag" class="pda-input" placeholder="Quét mã vạch TagID (VD: 100006178595)..." oninput="handlePdaTagLookup(this.value)" onkeydown="handlePdaKeydown(event, 'pda-input-qty')" />
-          </div>
-
-          <!-- Live Lookup Preview Box -->
-          <div class="pda-live-lookup" id="pda-live-lookup">
-            💡 Quét TagID để tự động tra cứu Mã hàng, Kho, BIN & Số lượng tồn kho...
-          </div>
-
-          <!-- Step 4: Ô Số Lượng (Xuống dưới) -->
-          <div>
-            <div class="pda-field-label">
-              <span>🔢 4. Ô Số Lượng (Qty)</span>
-              <span style="font-size:0.68rem; color:#94a3b8;">Tự động lấy từ Tồn kho / Nhập tay</span>
-            </div>
-            <input type="number" id="pda-input-qty" class="pda-input" placeholder="Tự động theo TagID hoặc nhập số lượng..." onkeydown="handlePdaKeydown(event, 'SUBMIT')" />
-          </div>
-
-          <!-- Step 5: Nút OK Ghi Nhận -->
-          <button type="button" class="pda-ok-btn" onclick="submitPdaScan()">
-            ✅ OK — GHI NHẬN LÊN DÒNG TRÊN CÙNG
-          </button>
-        </div>
-
-        <div style="display:flex; justify-content:space-between; gap:8px;">
-          <button class="btn-3d btn-glass" style="flex:1; justify-content:center;" onclick="fillSampleUnscannedTag()">
-            ⚡ Thử Tag Chưa Quét
-          </button>
-          <button class="btn-3d btn-rose" style="flex:1; justify-content:center;" onclick="closePdaModal()">
-            ✖ Đóng Máy PDA
-          </button>
+      <div class="zebra-header">
+        <span>📡 ZEBRA PDA SCANNER</span>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <button class="zebra-btn-xs" onclick="fillSampleUnscannedTag()" title="Điền thử 1 Tag chưa quét">⚡ Test</button>
+          <button class="zebra-btn-xs" onclick="exportPdaScansOnly()" title="Xuất file Excel bảng quét">💾 Excel</button>
+          <button class="zebra-close-btn" onclick="closePdaModal()">✖ ĐÓNG</button>
         </div>
       </div>
 
-      <!-- Right: Live Scan Table inside PDA Modal (Top Row = Newest Scan) -->
-      <div class="pda-log-panel">
-        <div class="panel-header" style="margin-bottom:4px;">
-          <div>
-            <h3>📋 BẢNG GHI NHẬN QUÉT PDA TRỰC TIẾP (DÒNG MỚI NHẤT Ở TRÊN CÙNG)</h3>
-            <p style="font-size:0.78rem; color:#94a3b8; margin-top:2px;">
-              Mỗi lần bấm <strong>OK</strong>, dữ liệu quét được chèn ngay lên <strong>Dòng 1 (Trên cùng)</strong> và tự động đối soát với bảng Tồn kho.
-            </p>
+      <!-- PHẦN TRÊN: Ô MÁY QUÉT NGẮN GỌN (USE, Bin Location, TagID, Qty, OK) -->
+      <div class="zebra-scanner-top">
+        <div class="zebra-row-2col">
+          <div class="zebra-field">
+            <label for="pda-input-user">USE</label>
+            <input type="text" id="pda-input-user" class="zebra-input" value="Thanh" placeholder="USE" onkeydown="handlePdaKeydown(event, 'pda-input-loc')" />
           </div>
-          <div style="display:flex; gap:8px;">
-            <button class="btn-3d btn-primary" onclick="exportPdaScansOnly()">
-              <span>💾</span> Xuất File Quét PDA (.xlsx)
-            </button>
-            <button class="btn-3d btn-rose" onclick="clearScanData()">
-              <span>🗑️</span> Xóa Bảng Quét Về 0
-            </button>
+          <div class="zebra-field">
+            <label for="pda-input-loc">Bin Location</label>
+            <input type="text" id="pda-input-loc" class="zebra-input" placeholder="Bin Location" onkeydown="handlePdaKeydown(event, 'pda-input-tag')" />
           </div>
         </div>
 
-        <div class="table-wrap" style="flex:1; max-height: 520px;">
-          <table class="data-table">
+        <div class="zebra-field">
+          <label for="pda-input-tag">TagID</label>
+          <input type="text" id="pda-input-tag" class="zebra-input" placeholder="Scan TagID..." oninput="handlePdaTagLookup(this.value)" onkeydown="handlePdaKeydown(event, 'pda-input-qty')" />
+        </div>
+
+        <div class="zebra-qty-ok-row">
+          <div class="zebra-field">
+            <label for="pda-input-qty">Qty</label>
+            <input type="number" id="pda-input-qty" class="zebra-input" placeholder="Qty" onkeydown="handlePdaKeydown(event, 'SUBMIT')" />
+          </div>
+          <button type="button" class="zebra-ok-btn" id="pda-ok-btn" onclick="submitPdaScan()">
+            OK
+          </button>
+        </div>
+
+        <div class="zebra-status-strip" id="pda-live-lookup">
+          Sẵn sàng quét TagID...
+        </div>
+      </div>
+
+      <!-- PHẦN DƯỚI: LOG TAG QUÉT ĐƯỢC (CÓ SỬA / XÓA NGAY DÒNG VỪA QUÉT) -->
+      <div class="zebra-log-bottom">
+        <div class="zebra-log-bar">
+          <span class="zebra-log-title">LOG QUÉT (<span id="zebra-log-count">0</span>)</span>
+          <div class="zebra-mini-actions">
+            <button class="zebra-btn-xs" onclick="editLatestPdaScan()" title="Chỉnh sửa ngay dòng vừa quét trên cùng">✏️ Sửa dòng đầu</button>
+            <button class="zebra-btn-xs danger" onclick="deleteLatestPdaScan()" title="Xóa ngay dòng vừa quét trên cùng">🗑️ Xóa dòng đầu</button>
+          </div>
+        </div>
+
+        <div class="zebra-log-scroll">
+          <table class="zebra-log-table">
             <thead>
               <tr>
-                <th>Dòng</th>
-                <th>User (USE)</th>
-                <th>Vị Trí</th>
-                <th>TagID (Batch)</th>
-                <th class="num-col">Số Lượng</th>
-                <th>Mã Hàng Đối Soát</th>
-                <th>Kho</th>
-                <th>Thời Gian</th>
-                <th>Trạng Thái</th>
+                <th>#</th>
+                <th>Sửa/Xóa</th>
+                <th>TagID</th>
+                <th>Bin</th>
+                <th class="num-col">Qty</th>
+                <th>USE</th>
               </tr>
             </thead>
             <tbody id="pda-modal-tbody"></tbody>

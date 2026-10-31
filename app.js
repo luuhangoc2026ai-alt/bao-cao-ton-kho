@@ -1,11 +1,10 @@
 /**
- * HỆ THỐNG BÁO CÁO ĐỐI SOÁT TỒN KHO 3D & MULTI-AGENT PDA
+ * HỆ THỐNG BÁO CÁO ĐỐI SOÁT TỒN KHO 3D & MULTI-AGENT PDA ZEBRA
  * ---------------------------------------------------------------------------
- * Kiến trúc Đa Tác Tử (Multi-Agent Reconciliation Architecture):
- *  - Agent 1 (StockScopeAgent): Chuẩn hóa & lọc dữ liệu Kho 01, 61 và mã hàng 3*, 5*, 7*.
- *  - Agent 2 (TagReconcileAgent): Đối soát TagID quét PDA với BATCH trên tồn kho để suy ra Số lượng.
- *  - Agent 3 (AnomalyGuardAgent): Phát hiện & khử trùng lặp TagID (chống cộng dồn SL ảo), kiểm tra lệch BIN.
- *  - Agent 4 (ReportSynthesizerAgent): Tổng hợp KPI động 3D, biểu đồ lãnh đạo & xuất Excel 5 Sheet.
+ * - Giao diện máy quét PDA chuẩn màn hình nhỏ Zebra (Phần quét ở trên: USE, Bin Location, TagID, Qty, OK;
+ *   Log tag quét ở ngay bên dưới kèm nút Sửa ✏️ / Xóa 🗑️ tức thì khi quét sai).
+ * - Mô hình 3D động hiển thị đầy đủ số liệu trực tiếp trên từng cột, hỗ trợ Dừng xoay, Phóng to/Thu nhỏ,
+ *   Góc nhìn chuẩn, Phóng rộng toàn màn hình, và chuyển đổi linh hoạt giữa Biểu đồ Cột / Đường (Line).
  */
 
 const AppState = {
@@ -21,12 +20,25 @@ const AppState = {
   searchQuery: '',
   activeTab: 'tab-items',
 
+  // PDA Editing State (-1 = New Scan, >=0 = Editing existing row index in scanRaw)
+  editingScanIndex: -1,
+
+  // Chart & 3D State
+  mainChartMode: 'combo', // 'combo' | 'line' | 'bar'
+  autoRotate3D: true,
+
   // Computed Reconciliation Result
   reconciled: null
 };
 
 // Formatters
 const fmtNum = (n) => Number(n || 0).toLocaleString('vi-VN');
+const fmtCompact = (n) => {
+  const v = Number(n || 0);
+  if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+  return String(v);
+};
 const fmtPct = (n) => `${Number(n || 0).toFixed(2)}%`;
 
 function normalizeWh(wh) {
@@ -86,7 +98,7 @@ function runMultiAgentReconciliation() {
   for (const [tag, scans] of scanByTag.entries()) {
     if (scans.length > 1) {
       const st = filteredStockByBatch.get(tag) || (otherStockByBatch.get(tag) ? otherStockByBatch.get(tag)[0] : null);
-      const unitQty = st ? st.qty : (Number(scans[0].manualQty) || 0);
+      const unitQty = (Number(scans[0].manualQty) > 0) ? Number(scans[0].manualQty) : (st ? st.qty : 0);
       const extraCount = scans.length - 1;
       const preventedQty = extraCount * unitQty;
       totalExtraDuplicateScans += extraCount;
@@ -166,9 +178,9 @@ function runMultiAgentReconciliation() {
     const scans = scanByTag.get(st.batch) || [];
     const isScanned = scans.length > 0;
     const isDup = scans.length > 1;
-    // Reconciled Qty: When scanned by PDA, TagID matches Stock Batch -> returns Stock Qty (or manual override if Stock Qty is 0)
-    const scannedQty = isScanned ? (st.qty > 0 ? st.qty : (Number(scans[0].manualQty) || 0)) : 0;
-    const missingQty = isScanned ? 0 : st.qty;
+    // If user manually edited Qty on PDA (>0), respect manualQty; otherwise take Stock Batch Qty
+    const scannedQty = isScanned ? ((Number(scans[0].manualQty) > 0) ? Number(scans[0].manualQty) : st.qty) : 0;
+    const missingQty = isScanned ? Math.max(0, st.qty - scannedQty) : st.qty;
     const scanLoc = isScanned ? scans[0].loc : '';
     const isLocDiff = isScanned && st.bin && scanLoc && st.bin !== scanLoc;
 
@@ -178,6 +190,7 @@ function runMultiAgentReconciliation() {
     if (isScanned) {
       totalScannedTags++;
       totalScannedQty += scannedQty;
+      totalMissingQty += missingQty;
       if (isLocDiff) totalLocMismatch++;
     } else {
       totalMissingTags++;
@@ -239,6 +252,7 @@ function runMultiAgentReconciliation() {
     if (isScanned) {
       grp.scannedTags++;
       grp.scannedQty += scannedQty;
+      grp.missingQty += missingQty;
       for (const sc of scans) {
         if (sc.loc) grp.scanLocs.add(sc.loc);
       }
@@ -290,13 +304,14 @@ function runMultiAgentReconciliation() {
     if (td.isScanned) {
       m.scannedTags++;
       m.scannedQty += td.scannedQty;
+      m.missingQty += td.missingQty;
     } else {
       m.missingTags++;
       m.missingQty += td.missingQty;
     }
   }
 
-  // User scan statistics (case-insensitive normalized user names)
+  // User scan statistics
   const userStatsMap = new Map();
   for (const s of AppState.scanRaw) {
     const rawUser = String(s.user || 'Khác').trim();
@@ -344,7 +359,6 @@ function updateDashboardUI() {
   const r = AppState.reconciled;
   if (!r) return;
 
-  // Update Agent Status Bar
   const hasStock = AppState.stockRaw.length > 0;
   const hasScan = AppState.scanRaw.length > 0;
   document.getElementById('agent1-dot').className = 'agent-dot' + (hasStock ? '' : ' idle');
@@ -641,45 +655,48 @@ function renderActiveTables() {
     }).join('');
   }
 
-  // 5. Render Tab PDA Log (Top Row = Newest Scan)
+  // 5. Render Tab PDA Log (Top Row = Newest Scan + Edit/Delete buttons)
   const tbodyPdaLog = document.getElementById('tbody-pda-log');
-  const pdaFiltered = AppState.scanRaw.filter((s) => {
-    if (!q) return true;
-    return `${s.tag} ${s.loc} ${s.user} ${s.time}`.toLowerCase().includes(q);
-  });
-  if (pdaFiltered.length === 0) {
+  if (AppState.scanRaw.length === 0) {
     tbodyPdaLog.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:24px; color:#94a3b8;">Bảng dữ liệu quét PDA đang trống (0 dòng).</td></tr>`;
   } else {
-    tbodyPdaLog.innerHTML = pdaFiltered.slice(0, 600).map((s, i) => {
+    const rowsHtml = [];
+    for (let i = 0; i < AppState.scanRaw.length && rowsHtml.length < 500; i++) {
+      const s = AppState.scanRaw[i];
+      if (q && !`${s.tag} ${s.loc} ${s.user} ${s.time}`.toLowerCase().includes(q)) continue;
       const st = r.filteredStockByBatch.get(s.tag);
       const scansForTag = r.scanByTag.get(s.tag) || [];
-      const qty = st ? st.qty : (Number(s.manualQty) || 0);
-      let badge = `<span class="status-pill status-ok">Khớp Tồn Kho</span>`;
+      const qty = (Number(s.manualQty) > 0) ? Number(s.manualQty) : (st ? st.qty : 0);
+      let badge = `<span class="status-pill status-ok">Khớp</span>`;
       if (!st) badge = `<span class="status-pill status-warn">Ngoài Kho 01/61</span>`;
-      else if (scansForTag.length > 1) badge = `<span class="status-pill status-dup">Quét trùng (${scansForTag.length}x)</span>`;
+      else if (scansForTag.length > 1) badge = `<span class="status-pill status-dup">Trùng (${scansForTag.length}x)</span>`;
 
-      return `
+      rowsHtml.push(`
         <tr class="${s.isNew ? 'new-scan-highlight' : ''}">
           <td><strong>#${i + 1}</strong> ${s.isNew ? '🆕' : ''}</td>
-          <td>${s.stt}</td>
+          <td>
+            <button class="row-action-btn" onclick="openPdaAndEditRow(${i})" title="Sửa dòng này">✏️ Sửa</button>
+            <button class="row-action-btn del" onclick="deletePdaRow(${i})" title="Xóa dòng này">🗑️ Xóa</button>
+          </td>
           <td style="font-family:'JetBrains Mono',monospace; font-weight:700; color:#7dd3fc;">${s.tag}</td>
           <td>${s.loc || '-'}</td>
           <td><strong>${s.user || '-'}</strong></td>
-          <td>${s.time || '-'}</td>
-          <td style="font-family:'JetBrains Mono',monospace;">${st ? `${st.code} (Kho ${st.wh})` : '-'}</td>
           <td class="num-col"><strong>${fmtNum(qty)}</strong></td>
+          <td style="font-family:'JetBrains Mono',monospace;">${st ? `${st.code} (Kho ${st.wh})` : '-'}</td>
+          <td>${s.time || '-'}</td>
           <td>${badge}</td>
         </tr>
-      `;
-    }).join('');
+      `);
+    }
+    tbodyPdaLog.innerHTML = rowsHtml.join('');
   }
 
   document.getElementById('table-showing-info').textContent =
-    `Đang lọc: ${fmtNum(filteredItems.length)} Mã hàng | ${fmtNum(filteredDetails.length)} TagID (Tối đa hiển thị 600 dòng trên giao diện, Xuất Excel đầy đủ 100%)`;
+    `Đang lọc: ${fmtNum(filteredItems.length)} Mã hàng | ${fmtNum(filteredDetails.length)} TagID`;
 }
 
 /* ==========================================================================
-   FLOATING PDA BARCODE SCANNER MODAL (MÁY QUÉT MÃ VẠCH PDA)
+   ZEBRA PDA COMPACT SCANNER MODAL (USE, Bin Location, TagID, Qty, OK + EDIT/DELETE)
    ========================================================================== */
 function openPdaModal() {
   document.getElementById('pda-modal-overlay').classList.add('open');
@@ -691,7 +708,13 @@ function openPdaModal() {
 }
 
 function closePdaModal() {
+  cancelPdaEditMode();
   document.getElementById('pda-modal-overlay').classList.remove('open');
+}
+
+function openPdaAndEditRow(idx) {
+  openPdaModal();
+  editPdaRow(idx);
 }
 
 function handlePdaKeydown(event, nextFieldId) {
@@ -715,8 +738,8 @@ function handlePdaTagLookup(tagVal) {
   const qtyInput = document.getElementById('pda-input-qty');
   const r = AppState.reconciled;
   if (!tag || !r) {
-    box.innerHTML = '💡 Quét TagID để tự động tra cứu Mã hàng, Kho, BIN & Số lượng tồn kho...';
-    box.style.borderColor = 'rgba(148, 163, 184, 0.35)';
+    box.innerHTML = 'Sẵn sàng quét TagID...';
+    box.style.borderColor = 'rgba(56, 189, 248, 0.25)';
     return;
   }
 
@@ -725,22 +748,24 @@ function handlePdaTagLookup(tagVal) {
   const otherSt = r.otherStockByBatch.get(tag);
 
   if (st) {
-    qtyInput.value = st.qty;
-    if (existingScans.length > 0) {
+    if (AppState.editingScanIndex < 0) {
+      qtyInput.value = st.qty;
+    }
+    if (existingScans.length > 0 && AppState.editingScanIndex < 0) {
       box.style.borderColor = '#f59e0b';
-      box.innerHTML = `⚠️ <strong>CẢNH BÁO TRÙNG TAGID!</strong> Tag này đã được quét ${existingScans.length} lần (Mã: <strong>${st.code}</strong> | Kho ${st.wh} | SL gốc: <strong>${fmtNum(st.qty)}</strong>).`;
+      box.innerHTML = `⚠️ TRÙNG TAG (${existingScans.length}x) | Mã ${st.code} | SL: ${fmtNum(st.qty)}`;
     } else {
       box.style.borderColor = '#10b981';
-      box.innerHTML = `✅ <strong>KHỚP TỒN KHO:</strong> Mã <strong>${st.code}</strong> | Kho <strong>${st.wh}</strong> | BIN sổ: <strong>${st.bin || '-'}</strong> | SL tự động: <strong style="color:#34d399;">${fmtNum(st.qty)}</strong>`;
+      box.innerHTML = `✅ Mã: <strong>${st.code}</strong> (Kho ${st.wh}) | BIN: ${st.bin || '-'} | SL: <strong style="color:#34d399;">${fmtNum(st.qty)}</strong>`;
     }
   } else if (otherSt && otherSt.length > 0) {
     const o = otherSt[0];
-    qtyInput.value = o.qty;
+    if (AppState.editingScanIndex < 0) qtyInput.value = o.qty;
     box.style.borderColor = '#a855f7';
-    box.innerHTML = `ℹ️ Tag thuộc <strong>Kho ${o.wh}</strong> (Ngoài Kho 01/61 hoặc Mã ${o.code}) | SL: <strong>${fmtNum(o.qty)}</strong>`;
+    box.innerHTML = `ℹ️ Kho ${o.wh} | Mã ${o.code} | SL: ${fmtNum(o.qty)}`;
   } else {
     box.style.borderColor = '#f43f5e';
-    box.innerHTML = `❓ TagID chưa có trong file Tồn kho. Bạn có thể nhập Số lượng thủ công bên dưới để ghi nhận.`;
+    box.innerHTML = `❓ Tag chưa có trên sổ tồn — Nhập Qty thủ công`;
   }
 }
 
@@ -750,8 +775,8 @@ function submitPdaScan() {
   const tagEl = document.getElementById('pda-input-tag');
   const qtyEl = document.getElementById('pda-input-qty');
 
-  const user = String(userEl.value || '').trim() || 'USER_PDA';
-  const loc = String(locEl.value || '').trim() || 'PDA-LOC';
+  const user = String(userEl.value || '').trim() || 'USER';
+  const loc = String(locEl.value || '').trim() || '-';
   const tag = String(tagEl.value || '').trim();
   const manualQty = Number(qtyEl.value) || 0;
 
@@ -764,7 +789,24 @@ function submitPdaScan() {
   const pad = (n) => String(n).padStart(2, '0');
   const timeStr = `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
-  // Prepend (unshift) to the VERY TOP ROW of AppState.scanRaw as requested!
+  if (AppState.editingScanIndex >= 0 && AppState.editingScanIndex < AppState.scanRaw.length) {
+    // Update existing row in-place
+    const row = AppState.scanRaw[AppState.editingScanIndex];
+    row.user = user;
+    row.loc = loc;
+    row.tag = tag;
+    row.manualQty = manualQty;
+    row.time = timeStr;
+    row.isNew = true;
+
+    cancelPdaEditMode();
+    runMultiAgentReconciliation();
+    document.getElementById('pda-live-lookup').innerHTML = `✅ Đã cập nhật dòng sửa Tag <strong>${tag}</strong>!`;
+    tagEl.focus();
+    return;
+  }
+
+  // Insert NEW scan at Top Row (Row 1 / index 0)
   const newScanRecord = {
     stt: `PDA-${AppState.scanRaw.length + 1}`,
     tag,
@@ -776,22 +818,80 @@ function submitPdaScan() {
   };
 
   AppState.scanRaw.unshift(newScanRecord);
-  AppState.scanFileName = `Quét trực tiếp PDA (${AppState.scanRaw.length} dòng)`;
+  AppState.scanFileName = `Quét PDA (${AppState.scanRaw.length} dòng)`;
 
-  // Re-run Multi-Agent Reconciliation immediately
   runMultiAgentReconciliation();
 
-  // Clear TagID and Qty inputs, keep User and Location for fast consecutive scanning or focus TagID
   tagEl.value = '';
   qtyEl.value = '';
-  document.getElementById('pda-live-lookup').innerHTML =
-    `🎉 Đã ghi nhận Tag <strong>${tag}</strong> lên <strong>Dòng 1 (Trên cùng)</strong> và cập nhật đối soát tồn kho!`;
+  document.getElementById('pda-live-lookup').innerHTML = `✅ Đã ghi Dòng 1: <strong>${tag}</strong> (${loc})`;
   tagEl.focus();
+}
+
+function editPdaRow(idx) {
+  if (idx < 0 || idx >= AppState.scanRaw.length) return;
+  const row = AppState.scanRaw[idx];
+  const r = AppState.reconciled;
+  const st = r ? r.filteredStockByBatch.get(row.tag) : null;
+  const qty = (Number(row.manualQty) > 0) ? Number(row.manualQty) : (st ? st.qty : 0);
+
+  AppState.editingScanIndex = idx;
+  document.getElementById('pda-input-user').value = row.user || '';
+  document.getElementById('pda-input-loc').value = row.loc || '';
+  document.getElementById('pda-input-tag').value = row.tag || '';
+  document.getElementById('pda-input-qty').value = qty || '';
+
+  const okBtn = document.getElementById('pda-ok-btn');
+  okBtn.textContent = `LƯU DÒNG #${idx + 1}`;
+  okBtn.classList.add('editing-mode');
+
+  const box = document.getElementById('pda-live-lookup');
+  box.style.borderColor = '#f59e0b';
+  box.innerHTML = `✏️ Đang sửa Dòng #${idx + 1} (${row.tag}) — Bấm LƯU sau khi sửa`;
+  document.getElementById('pda-input-tag').focus();
+}
+
+function cancelPdaEditMode() {
+  AppState.editingScanIndex = -1;
+  const okBtn = document.getElementById('pda-ok-btn');
+  if (okBtn) {
+    okBtn.textContent = 'OK';
+    okBtn.classList.remove('editing-mode');
+  }
+  document.getElementById('pda-input-tag').value = '';
+  document.getElementById('pda-input-qty').value = '';
+}
+
+function deletePdaRow(idx) {
+  if (idx < 0 || idx >= AppState.scanRaw.length) return;
+  const removed = AppState.scanRaw.splice(idx, 1)[0];
+  if (AppState.editingScanIndex === idx) {
+    cancelPdaEditMode();
+  } else if (AppState.editingScanIndex > idx) {
+    AppState.editingScanIndex--;
+  }
+  runMultiAgentReconciliation();
+  const box = document.getElementById('pda-live-lookup');
+  if (box && removed) {
+    box.style.borderColor = '#f43f5e';
+    box.innerHTML = `🗑️ Đã xóa dòng Tag <strong>${removed.tag}</strong>`;
+  }
+}
+
+function editLatestPdaScan() {
+  if (AppState.scanRaw.length === 0) return;
+  editPdaRow(0);
+}
+
+function deleteLatestPdaScan() {
+  if (AppState.scanRaw.length === 0) return;
+  deletePdaRow(0);
 }
 
 function fillSampleUnscannedTag() {
   const r = AppState.reconciled;
   if (!r) return;
+  cancelPdaEditMode();
   const missingItem = r.tagDetails.find((t) => !t.isScanned);
   if (!missingItem) {
     alert('Tất cả TagID trong phạm vi lọc hiện tại đều đã được quét đủ 100%!');
@@ -805,41 +905,41 @@ function fillSampleUnscannedTag() {
 
 function renderPdaModalTable() {
   const tbody = document.getElementById('pda-modal-tbody');
+  const countEl = document.getElementById('zebra-log-count');
+  if (countEl) countEl.textContent = fmtNum(AppState.scanRaw.length);
   if (!tbody || !AppState.reconciled) return;
   const r = AppState.reconciled;
 
   if (AppState.scanRaw.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:24px; color:#94a3b8;">Chưa có dữ liệu quét. Hãy nhập Vị trí, TagID, Số lượng và nhấn OK!</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:16px; color:#94a3b8;">Trống (0 dòng)</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = AppState.scanRaw.slice(0, 150).map((s, idx) => {
+  tbody.innerHTML = AppState.scanRaw.slice(0, 120).map((s, idx) => {
     const st = r.filteredStockByBatch.get(s.tag);
     const scansForTag = r.scanByTag.get(s.tag) || [];
-    const qty = st ? st.qty : (Number(s.manualQty) || 0);
-    let statusHtml = `<span class="status-pill status-ok">Khớp Tồn Kho</span>`;
-    if (!st) statusHtml = `<span class="status-pill status-warn">Ngoài Kho 01/61</span>`;
-    else if (scansForTag.length > 1) statusHtml = `<span class="status-pill status-dup">Trùng (${scansForTag.length}x)</span>`;
+    const qty = (Number(s.manualQty) > 0) ? Number(s.manualQty) : (st ? st.qty : 0);
+    const isDup = scansForTag.length > 1;
+    const tagColor = !st ? '#f43f5e' : (isDup ? '#fbbf24' : '#34d399');
 
     return `
       <tr class="${s.isNew ? 'new-scan-highlight' : ''}">
-        <td><strong>Dòng ${idx + 1}</strong> ${idx === 0 ? '🔝' : ''}</td>
-        <td><strong>${s.user || '-'}</strong></td>
+        <td><strong>${idx + 1}</strong></td>
+        <td>
+          <button class="row-action-btn" onclick="editPdaRow(${idx})" title="Sửa dòng này">✏️</button>
+          <button class="row-action-btn del" onclick="deletePdaRow(${idx})" title="Xóa dòng này">🗑️</button>
+        </td>
+        <td style="font-family:'JetBrains Mono',monospace; font-weight:700; color:${tagColor};">${s.tag}</td>
         <td>${s.loc || '-'}</td>
-        <td style="font-family:'JetBrains Mono',monospace; font-weight:700; color:#7dd3fc;">${s.tag}</td>
         <td class="num-col"><strong>${fmtNum(qty)}</strong></td>
-        <td style="font-family:'JetBrains Mono',monospace;">${st ? st.code : '-'}</td>
-        <td>${st ? `Kho ${st.wh}` : '-'}</td>
-        <td>${s.time || '-'}</td>
-        <td>${statusHtml}</td>
+        <td>${s.user || '-'}</td>
       </tr>
     `;
   }).join('');
 }
 
 /* ==========================================================================
-   UNIVERSAL FILE IMPORTER (.xlsx, .xls, .csv, .tsv, .json, .txt, .xml)
-   & CLEAR DATA CONTROLS (XÓA DỮ LIỆU CŨ VỀ 0)
+   UNIVERSAL FILE IMPORTER & CLEAR DATA CONTROLS (XÓA DỮ LIỆU CŨ VỀ 0)
    ========================================================================== */
 function clearStockData() {
   AppState.stockRaw = [];
@@ -851,6 +951,7 @@ function clearStockData() {
 function clearScanData() {
   AppState.scanRaw = [];
   AppState.scanFileName = 'Đã xóa (0 dòng)';
+  cancelPdaEditMode();
   document.getElementById('input-file-scan').value = '';
   runMultiAgentReconciliation();
 }
@@ -860,12 +961,14 @@ function clearAllSources() {
   AppState.scanRaw = [];
   AppState.stockFileName = 'Đã xóa (0 dòng)';
   AppState.scanFileName = 'Đã xóa (0 dòng)';
+  cancelPdaEditMode();
   document.getElementById('input-file-stock').value = '';
   document.getElementById('input-file-scan').value = '';
   runMultiAgentReconciliation();
 }
 
 function restoreDefaultData() {
+  cancelPdaEditMode();
   loadInitialBundle();
   runMultiAgentReconciliation();
 }
@@ -980,56 +1083,163 @@ function handleScanFileUpload(event) {
 }
 
 /* ==========================================================================
-   CHARTS (CHART.JS) & 3D WAREHOUSE SCENE (THREE.JS)
+   CHARTS (COMBO BAR + LINE / LINE ONLY / BAR ONLY WITH DIRECT VALUE LABELS)
    ========================================================================== */
 let chartPrefixInstance = null;
 let chartUsersInstance = null;
 
+function setMainChartMode(mode) {
+  AppState.mainChartMode = mode;
+  document.getElementById('btn-chart-combo').classList.toggle('active', mode === 'combo');
+  document.getElementById('btn-chart-line').classList.toggle('active', mode === 'line');
+  document.getElementById('btn-chart-bar').classList.toggle('active', mode === 'bar');
+  if (AppState.reconciled) updateCharts(AppState.reconciled);
+}
+
+// Custom plugin to draw values directly above bars/points in Chart.js
+const directValueLabelPlugin = {
+  id: 'directValueLabelPlugin',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    ctx.save();
+    ctx.font = 'bold 10px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+
+    chart.data.datasets.forEach((dataset, dsIndex) => {
+      const meta = chart.getDatasetMeta(dsIndex);
+      if (meta.hidden) return;
+      meta.data.forEach((element, index) => {
+        const val = dataset.data[index];
+        if (!val || val <= 0) return;
+        let text = '';
+        if (dataset.yAxisID === 'yPct') {
+          text = `${Number(val).toFixed(1)}%`;
+          ctx.fillStyle = '#38bdf8';
+        } else {
+          text = fmtCompact(val);
+          ctx.fillStyle = dsIndex === 0 ? '#34d399' : '#fb7185';
+        }
+        ctx.fillText(text, element.x, element.y - 4);
+      });
+    });
+    ctx.restore();
+  }
+};
+
 function updateCharts(r) {
   const ctxPrefix = document.getElementById('chart-prefix').getContext('2d');
-  const labels = r.matrixRows.map((m) => `Kho ${m.wh} - Mã ${m.prefix}`);
+  const labels = r.matrixRows.map((m) => `Kho ${m.wh}-${m.prefix}`);
   const scannedData = r.matrixRows.map((m) => m.scannedQty);
   const missingData = r.matrixRows.map((m) => m.missingQty);
+  const pctData = r.matrixRows.map((m) => (m.stockQty > 0 ? Number(((m.scannedQty / m.stockQty) * 100).toFixed(2)) : 0));
+
+  const mode = AppState.mainChartMode;
+  const datasets = [];
+
+  if (mode === 'combo' || mode === 'bar') {
+    datasets.push(
+      {
+        type: 'bar',
+        label: 'SL Kiểm Được',
+        data: scannedData.length ? scannedData : [0],
+        backgroundColor: 'rgba(16, 185, 129, 0.82)',
+        borderColor: '#10b981',
+        borderWidth: 1,
+        borderRadius: 6,
+        yAxisID: 'y'
+      },
+      {
+        type: 'bar',
+        label: 'SL Thiếu',
+        data: missingData.length ? missingData : [0],
+        backgroundColor: 'rgba(244, 63, 94, 0.85)',
+        borderColor: '#f43f5e',
+        borderWidth: 1,
+        borderRadius: 6,
+        yAxisID: 'y'
+      }
+    );
+  }
+
+  if (mode === 'line') {
+    datasets.push(
+      {
+        type: 'line',
+        label: 'SL Kiểm Được (Đường)',
+        data: scannedData.length ? scannedData : [0],
+        borderColor: '#10b981',
+        backgroundColor: 'rgba(16, 185, 129, 0.2)',
+        fill: true,
+        tension: 0.32,
+        pointRadius: 5,
+        pointBackgroundColor: '#10b981',
+        yAxisID: 'y'
+      },
+      {
+        type: 'line',
+        label: 'SL Thiếu (Đường)',
+        data: missingData.length ? missingData : [0],
+        borderColor: '#f43f5e',
+        backgroundColor: 'rgba(244, 63, 94, 0.2)',
+        fill: true,
+        tension: 0.32,
+        pointRadius: 5,
+        pointBackgroundColor: '#f43f5e',
+        yAxisID: 'y'
+      }
+    );
+  }
+
+  if (mode === 'combo' || mode === 'line') {
+    datasets.push({
+      type: 'line',
+      label: '% Đạt SL',
+      data: pctData.length ? pctData : [0],
+      borderColor: '#38bdf8',
+      backgroundColor: '#38bdf8',
+      borderWidth: 2.5,
+      tension: 0.3,
+      pointRadius: 5,
+      yAxisID: 'yPct'
+    });
+  }
 
   if (chartPrefixInstance) chartPrefixInstance.destroy();
   chartPrefixInstance = new Chart(ctxPrefix, {
-    type: 'bar',
     data: {
       labels: labels.length ? labels : ['Trống (0)'],
-      datasets: [
-        {
-          label: 'SL Kiểm Được (Khớp TagID)',
-          data: scannedData.length ? scannedData : [0],
-          backgroundColor: 'rgba(16, 185, 129, 0.82)',
-          borderColor: '#10b981',
-          borderWidth: 1,
-          borderRadius: 6
-        },
-        {
-          label: 'SL Thiếu So Với Tồn Kho',
-          data: missingData.length ? missingData : [0],
-          backgroundColor: 'rgba(244, 63, 94, 0.85)',
-          borderColor: '#f43f5e',
-          borderWidth: 1,
-          borderRadius: 6
-        }
-      ]
+      datasets
     },
+    plugins: [directValueLabelPlugin],
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      layout: { padding: { top: 20 } },
       plugins: {
         legend: { labels: { color: '#cbd5e1', font: { size: 11 } } }
       },
       scales: {
-        x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.08)' } },
-        y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.08)' } }
+        x: { ticks: { color: '#e2e8f0', font: { weight: 'bold' } }, grid: { color: 'rgba(148,163,184,0.08)' } },
+        y: {
+          position: 'left',
+          ticks: { color: '#94a3b8', callback: (v) => fmtCompact(v) },
+          grid: { color: 'rgba(148,163,184,0.08)' }
+        },
+        yPct: {
+          position: 'right',
+          min: 0,
+          max: 115,
+          display: mode !== 'bar',
+          ticks: { color: '#38bdf8', callback: (v) => `${v}%` },
+          grid: { drawOnChartArea: false }
+        }
       }
     }
   });
 
   const ctxUsers = document.getElementById('chart-users').getContext('2d');
-  const uLabels = r.userStats.map((u) => u[0]);
+  const uLabels = r.userStats.map((u) => `${u[0]} (${fmtNum(u[1])})`);
   const uCounts = r.userStats.map((u) => u[1]);
 
   if (chartUsersInstance) chartUsersInstance.destroy();
@@ -1050,49 +1260,82 @@ function updateCharts(r) {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'right', labels: { color: '#cbd5e1', font: { size: 11 } } }
+        legend: { position: 'bottom', labels: { color: '#cbd5e1', font: { size: 11 } } }
       }
     }
   });
 }
 
-// 3D WebGL Scene (Three.js)
+/* ==========================================================================
+   3D WEBGL SCENE WITH DIRECT COLUMN VALUE SPRITES, PAUSE, ZOOM & FULLSCREEN
+   ========================================================================== */
 let threeScene, threeCamera, threeRenderer, threeBarsGroup;
 let isDragging3D = false, prevMouseX = 0, prevMouseY = 0;
-let targetRotY = -0.45, targetRotX = 0.25;
+let targetRotY = 0.0, targetRotX = 0.18;
+
+// Helper to create crisp 3D Billboard Sprite with multi-line text right on/above 3D pillars
+function create3DTextSprite(lines, borderColor = '#38bdf8', scaleWidth = 2.1) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 220;
+  const ctx = canvas.getContext('2d');
+
+  // Rounded dark glass box
+  ctx.fillStyle = 'rgba(7, 11, 20, 0.88)';
+  ctx.strokeStyle = borderColor;
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.roundRect(8, 8, 496, 204, 24);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.textAlign = 'center';
+  lines.forEach((lineObj, i) => {
+    ctx.font = lineObj.font || 'bold 34px Inter, sans-serif';
+    ctx.fillStyle = lineObj.color || '#ffffff';
+    ctx.fillText(lineObj.text, 256, 58 + i * 52);
+  });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(scaleWidth, scaleWidth * (220 / 512), 1);
+  return sprite;
+}
 
 function init3DScene() {
   const container = document.getElementById('three-canvas-container');
   if (!container || typeof THREE === 'undefined') return;
 
-  const w = container.clientWidth || 460;
-  const h = container.clientHeight || 290;
+  const w = container.clientWidth || 520;
+  const h = container.clientHeight || 340;
 
   threeScene = new THREE.Scene();
-  threeCamera = new THREE.PerspectiveCamera(42, w / h, 0.1, 1000);
-  threeCamera.position.set(0, 7.5, 14.5);
-  threeCamera.lookAt(0, 1.5, 0);
+  threeCamera = new THREE.PerspectiveCamera(40, w / h, 0.1, 1000);
+  threeCamera.position.set(0, 6.2, 14.2);
+  threeCamera.lookAt(0, 1.8, 0);
 
   threeRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   threeRenderer.setSize(w, h);
   threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.insertBefore(threeRenderer.domElement, container.firstChild);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.75);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.85);
   threeScene.add(ambient);
 
-  const dirLight = new THREE.DirectionalLight(0x7dd3fc, 1.3);
-  dirLight.position.set(8, 14, 10);
+  const dirLight = new THREE.DirectionalLight(0x7dd3fc, 1.4);
+  dirLight.position.set(8, 15, 11);
   threeScene.add(dirLight);
 
-  const gridHelper = new THREE.GridHelper(13, 13, 0x38bdf8, 0x1e293b);
-  gridHelper.position.y = -0.5;
+  const gridHelper = new THREE.GridHelper(15, 15, 0x38bdf8, 0x1e293b);
+  gridHelper.position.y = -0.8;
   threeScene.add(gridHelper);
 
   threeBarsGroup = new THREE.Group();
   threeScene.add(threeBarsGroup);
 
-  // Mouse interaction to rotate 3D Warehouse bars
+  // Mouse drag to rotate
   container.addEventListener('mousedown', (e) => {
     isDragging3D = true;
     prevMouseX = e.clientX;
@@ -1103,17 +1346,25 @@ function init3DScene() {
     if (!isDragging3D) return;
     const dx = e.clientX - prevMouseX;
     const dy = e.clientY - prevMouseY;
-    targetRotY += dx * 0.01;
-    targetRotX = Math.max(-0.2, Math.min(0.8, targetRotX + dy * 0.006));
+    targetRotY += dx * 0.008;
+    targetRotX = Math.max(-0.25, Math.min(0.75, targetRotX + dy * 0.006));
     prevMouseX = e.clientX;
     prevMouseY = e.clientY;
   });
 
+  // Mouse wheel to zoom in/out
+  container.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    zoom3D(e.deltaY > 0 ? 1.1 : -1.1);
+  }, { passive: false });
+
+  window.addEventListener('resize', resize3DScene);
+
   function animate3D() {
     requestAnimationFrame(animate3D);
     if (threeBarsGroup) {
-      if (!isDragging3D) {
-        targetRotY += 0.0025;
+      if (AppState.autoRotate3D && !isDragging3D) {
+        targetRotY += 0.0022;
       }
       threeBarsGroup.rotation.y += (targetRotY - threeBarsGroup.rotation.y) * 0.1;
       threeBarsGroup.rotation.x += (targetRotX - threeBarsGroup.rotation.x) * 0.1;
@@ -1121,6 +1372,52 @@ function init3DScene() {
     threeRenderer.render(threeScene, threeCamera);
   }
   animate3D();
+}
+
+function resize3DScene() {
+  const container = document.getElementById('three-canvas-container');
+  if (!container || !threeRenderer || !threeCamera) return;
+  const w = container.clientWidth || 520;
+  const h = container.clientHeight || 340;
+  threeCamera.aspect = w / h;
+  threeCamera.updateProjectionMatrix();
+  threeRenderer.setSize(w, h);
+}
+
+function toggle3DRotation() {
+  AppState.autoRotate3D = !AppState.autoRotate3D;
+  const btn = document.getElementById('btn-3d-pause');
+  if (btn) {
+    btn.textContent = AppState.autoRotate3D ? '⏸️ Dừng Xoay' : '▶️ Tự Xoay';
+    btn.classList.toggle('active', AppState.autoRotate3D);
+  }
+}
+
+function zoom3D(deltaZ) {
+  if (!threeCamera) return;
+  threeCamera.position.z = Math.max(6.5, Math.min(26, threeCamera.position.z + deltaZ));
+}
+
+function reset3DView() {
+  targetRotY = 0.0;
+  targetRotX = 0.15;
+  if (threeCamera) {
+    threeCamera.position.set(0, 6.2, 13.8);
+    threeCamera.lookAt(0, 1.8, 0);
+  }
+  AppState.autoRotate3D = false;
+  const btn = document.getElementById('btn-3d-pause');
+  if (btn) {
+    btn.textContent = '▶️ Tự Xoay';
+    btn.classList.remove('active');
+  }
+}
+
+function toggleExpand3DPanel() {
+  const panel = document.getElementById('panel-3d-main');
+  if (!panel) return;
+  panel.classList.toggle('expanded-3d');
+  setTimeout(resize3DScene, 60);
 }
 
 function update3DScene(r) {
@@ -1132,16 +1429,17 @@ function update3DScene(r) {
   if (!r || r.matrixRows.length === 0) return;
 
   const maxLog = Math.max(...r.matrixRows.map((m) => Math.log10(m.stockQty + 10)), 1);
-  const spacing = 1.9;
+  const spacing = 2.35;
   const startX = -((r.matrixRows.length - 1) * spacing) / 2;
 
   r.matrixRows.forEach((m, idx) => {
     const xBase = startX + idx * spacing;
-    const scanH = m.scannedQty > 0 ? Math.max(0.35, (Math.log10(m.scannedQty + 1) / maxLog) * 5.2) : 0.05;
-    const missH = m.missingQty > 0 ? Math.max(0.25, (Math.log10(m.missingQty + 1) / maxLog) * 4.2) : 0.05;
+    const scanH = m.scannedQty > 0 ? Math.max(0.45, (Math.log10(m.scannedQty + 1) / maxLog) * 4.6) : 0.08;
+    const missH = m.missingQty > 0 ? Math.max(0.35, (Math.log10(m.missingQty + 1) / maxLog) * 3.8) : 0.08;
+    const pct = m.stockQty > 0 ? ((m.scannedQty / m.stockQty) * 100).toFixed(1) : '0.0';
 
-    // Scanned 3D Pillar (Emerald)
-    const geoScan = new THREE.BoxGeometry(0.62, scanH, 0.62);
+    // 1. Scanned 3D Pillar (Emerald)
+    const geoScan = new THREE.BoxGeometry(0.68, scanH, 0.68);
     const matScan = new THREE.MeshStandardMaterial({
       color: 0x10b981,
       emissive: 0x064e3b,
@@ -1149,11 +1447,11 @@ function update3DScene(r) {
       metalness: 0.35
     });
     const meshScan = new THREE.Mesh(geoScan, matScan);
-    meshScan.position.set(xBase - 0.34, -0.5 + scanH / 2, 0);
+    meshScan.position.set(xBase - 0.38, -0.8 + scanH / 2, 0);
     threeBarsGroup.add(meshScan);
 
-    // Missing 3D Pillar (Rose)
-    const geoMiss = new THREE.BoxGeometry(0.62, missH, 0.62);
+    // 2. Missing 3D Pillar (Rose)
+    const geoMiss = new THREE.BoxGeometry(0.68, missH, 0.68);
     const matMiss = new THREE.MeshStandardMaterial({
       color: 0xf43f5e,
       emissive: 0x881337,
@@ -1161,8 +1459,18 @@ function update3DScene(r) {
       metalness: 0.35
     });
     const meshMiss = new THREE.Mesh(geoMiss, matMiss);
-    meshMiss.position.set(xBase + 0.34, -0.5 + missH / 2, 0);
+    meshMiss.position.set(xBase + 0.38, -0.8 + missH / 2, 0);
     threeBarsGroup.add(meshMiss);
+
+    // 3. Direct Data Label Billboard above the pillar pair showing full numbers!
+    const topY = -0.8 + Math.max(scanH, missH) + 0.95;
+    const labelSprite = create3DTextSprite([
+      { text: `KHO ${m.wh} [${m.prefix}] (${pct}%)`, color: '#7dd3fc', font: 'bold 34px Inter, sans-serif' },
+      { text: `✓ Kiểm: ${fmtCompact(m.scannedQty)} (${m.scannedTags} Tag)`, color: '#34d399', font: 'bold 30px Inter, sans-serif' },
+      { text: `✗ Thiếu: ${fmtCompact(m.missingQty)} (${m.missingTags} Tag)`, color: '#fb7185', font: 'bold 30px Inter, sans-serif' }
+    ], m.missingQty === 0 ? '#10b981' : '#38bdf8', 2.2);
+    labelSprite.position.set(xBase, topY, 0);
+    threeBarsGroup.add(labelSprite);
   });
 }
 
@@ -1175,7 +1483,7 @@ function exportFullExcelReport() {
 
   const wb = XLSX.utils.book_new();
 
-  // SHEET 1: TỔNG HỢP BÁO CÁO LÃNH ĐẠO (EXECUTIVE SUMMARY)
+  // SHEET 1: TỔNG HỢP BÁO CÁO LÃNH ĐẠO
   const execRows = [
     ['BÁO CÁO ĐỐI SOÁT TỒN KHO & KIỂM KÊ THỰC TẾ PDA (KHO 01 & 61 | MÃ HÀNG 3*, 5*, 7*)'],
     ['Ngày xuất báo cáo:', new Date().toLocaleString('vi-VN')],
@@ -1279,19 +1587,19 @@ function exportFullExcelReport() {
   const wsAlerts = XLSX.utils.json_to_sheet(alertRows);
   XLSX.utils.book_append_sheet(wb, wsAlerts, '4_Canh_Bao_Trung_TagID');
 
-  // SHEET 5: DỮ LIỆU QUÉT PDA (DÒNG MỚI NHẤT Ở TRÊN CÙNG)
+  // SHEET 5: DỮ LIỆU QUÉT PDA
   const pdaRows = AppState.scanRaw.map((s, idx) => {
     const st = r.filteredStockByBatch.get(s.tag);
     return {
       'Thứ Tự Dòng': idx + 1,
       'STT Gốc': s.stt,
       'Tag ID': s.tag,
-      'Vị Trí': s.loc,
-      'User Quét (USE)': s.user,
+      'Bin Location': s.loc,
+      'USE': s.user,
       'Thời Gian Quét (PDA)': s.time,
       'Mã Hàng Khớp': st ? st.code : 'Ngoài phạm vi',
       'Kho Khớp': st ? st.wh : '-',
-      'Số Lượng Quy Đổi': st ? st.qty : (Number(s.manualQty) || 0)
+      'Qty': (Number(s.manualQty) > 0) ? Number(s.manualQty) : (st ? st.qty : 0)
     };
   });
   const wsPda = XLSX.utils.json_to_sheet(pdaRows);
@@ -1308,10 +1616,10 @@ function exportPdaScansOnly() {
     return {
       'STT': idx + 1,
       'Tag ID': s.tag,
-      'Vị trí': s.loc,
-      'User quét': s.user,
+      'Bin Location': s.loc,
+      'USE': s.user,
+      'Qty': (Number(s.manualQty) > 0) ? Number(s.manualQty) : (st ? st.qty : 0),
       'Thời gian quét (PDA)': s.time,
-      'Số lượng đối soát': st ? st.qty : (Number(s.manualQty) || 0),
       'Mã hàng': st ? st.code : ''
     };
   });
@@ -1394,7 +1702,6 @@ function loadInitialBundle() {
   }
 }
 
-// Expose programmatic API for AI Agents
 window.InventoryAgentAPI = {
   getState: () => AppState,
   getReconciledSummary: () => AppState.reconciled,
@@ -1409,6 +1716,8 @@ window.InventoryAgentAPI = {
     document.getElementById('pda-input-qty').value = qty || '';
     submitPdaScan();
   },
+  editPdaRow,
+  deletePdaRow,
   exportFullExcelReport
 };
 

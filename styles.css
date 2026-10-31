@@ -34,7 +34,6 @@ body {
   line-height: 1.5;
 }
 
-/* 3D Background Grid Effect */
 .bg-grid-3d {
   position: fixed;
   inset: 0;
@@ -245,7 +244,7 @@ body {
   margin-top: 2px;
 }
 
-/* Source Data Control Panel (2 Source Tables + Upload + Clear) */
+/* Source Data Control Panel */
 .data-source-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -537,7 +536,7 @@ body {
 /* 3D Visualization & Executive Charts Section */
 .visuals-grid {
   display: grid;
-  grid-template-columns: 1.15fr 1fr 1fr;
+  grid-template-columns: 1.35fr 1fr 0.85fr;
   gap: 18px;
   margin-bottom: 26px;
 }
@@ -552,16 +551,30 @@ body {
   flex-direction: column;
 }
 
+.panel-3d.expanded-3d {
+  position: fixed;
+  inset: 20px;
+  z-index: 950;
+  background: rgba(7, 11, 20, 0.98);
+  border: 2px solid #38bdf8;
+}
+
+.panel-3d.expanded-3d #three-canvas-container,
+.panel-3d.expanded-3d .chart-box {
+  height: calc(100vh - 150px) !important;
+}
+
 .panel-header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 14px;
-  gap: 10px;
+  margin-bottom: 12px;
+  gap: 8px;
 }
 
 .panel-header h3 {
-  font-size: 0.96rem;
+  font-size: 0.95rem;
   font-weight: 700;
   color: #f1f5f9;
   display: flex;
@@ -578,12 +591,44 @@ body {
   border: 1px solid rgba(56, 189, 248, 0.3);
 }
 
+.three-controls-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.ctrl-btn-mini {
+  background: rgba(30, 41, 59, 0.92);
+  border: 1px solid rgba(56, 189, 248, 0.32);
+  color: #e2e8f0;
+  padding: 4px 9px;
+  border-radius: 7px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.ctrl-btn-mini:hover {
+  background: #0284c7;
+  color: #fff;
+  border-color: #7dd3fc;
+}
+
+.ctrl-btn-mini.active {
+  background: #10b981;
+  border-color: #34d399;
+  color: #052e16;
+  font-weight: 800;
+}
+
 #three-canvas-container {
   width: 100%;
-  height: 290px;
+  height: 340px;
   border-radius: 12px;
-  background: radial-gradient(circle at center, rgba(14, 116, 144, 0.2), rgba(7, 11, 20, 0.85));
-  border: 1px solid rgba(56, 189, 248, 0.18);
+  background: radial-gradient(circle at center, rgba(14, 116, 144, 0.24), rgba(7, 11, 20, 0.92));
+  border: 1px solid rgba(56, 189, 248, 0.22);
   position: relative;
   overflow: hidden;
   cursor: grab;
@@ -595,26 +640,29 @@ body {
 
 .three-legend {
   position: absolute;
-  bottom: 10px;
-  left: 12px;
-  right: 12px;
+  bottom: 8px;
+  left: 10px;
+  right: 10px;
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
+  gap: 8px;
   font-size: 0.72rem;
-  color: #cbd5e1;
-  background: rgba(7, 11, 20, 0.75);
-  padding: 6px 10px;
+  color: #e2e8f0;
+  background: rgba(7, 11, 20, 0.82);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  padding: 5px 10px;
   border-radius: 8px;
   pointer-events: none;
 }
 
 .chart-box {
   position: relative;
-  height: 290px;
+  height: 340px;
   width: 100%;
 }
 
-/* Executive Breakdown Summary Table (Kho 01 & 61 x Mã 3*, 5*, 7*) */
+/* Executive Breakdown Summary Table */
 .exec-summary-section {
   margin-bottom: 26px;
 }
@@ -756,162 +804,267 @@ table.data-table td {
 }
 
 /* ==========================================================================
-   FLOATING PDA BARCODE SCANNER MODAL (MÁY QUÉT MÃ VẠCH PDA CHUYÊN DỤNG)
+   ZEBRA PDA COMPACT VERTICAL SCANNER MODAL
+   Thiết kế chuẩn màn hình nhỏ máy PDA Zebra:
+   - Phần Quét nằm ở TRÊN (USE, Bin Location, TagID, Qty, OK — cực kỳ ngắn gọn)
+   - Ô Ghi Log Tag Quét nằm ngay BÊN DƯỚI trong cùng thân máy PDA
+   - Có nút Sửa (✏️) / Xóa (🗑️) ngay từng dòng vừa quét khi quét sai
    ========================================================================== */
 .pda-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(3, 6, 12, 0.82);
-  backdrop-filter: blur(10px);
+  background: rgba(3, 6, 12, 0.84);
+  backdrop-filter: blur(8px);
   z-index: 1000;
   display: none;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: 10px;
 }
 
 .pda-modal-overlay.open {
   display: flex;
 }
 
-.pda-device-wrapper {
-  display: grid;
-  grid-template-columns: 410px 1fr;
-  gap: 22px;
+.zebra-pda-unit {
   width: 100%;
-  max-width: 1180px;
-  max-height: 92vh;
-  background: linear-gradient(145deg, #0f172a, #090d16);
-  border: 2px solid rgba(56, 189, 248, 0.4);
+  max-width: 430px;
+  max-height: 95vh;
+  background: linear-gradient(165deg, #1e293b 0%, #0b1120 100%);
+  border: 4px solid #334155;
   border-radius: 26px;
-  padding: 22px;
-  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.9), 0 0 40px rgba(56, 189, 248, 0.25);
+  padding: 12px 14px 14px;
+  box-shadow: 0 25px 65px rgba(0, 0, 0, 0.95), 0 0 30px rgba(56, 189, 248, 0.25), inset 0 2px 4px rgba(255, 255, 255, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   overflow: hidden;
 }
 
-/* Rugged Industrial Handheld PDA Unit */
-.pda-handheld {
-  background: linear-gradient(160deg, #1e293b 0%, #0f172a 100%);
-  border: 4px solid #334155;
-  border-radius: 28px;
-  padding: 18px;
-  box-shadow: inset 0 2px 6px rgba(255, 255, 255, 0.15), 0 15px 35px rgba(0, 0, 0, 0.7);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  position: relative;
-}
-
-.pda-laser-bar {
-  height: 6px;
-  width: 65%;
-  margin: 0 auto 4px;
+.zebra-laser-strip {
+  height: 5px;
+  width: 55%;
+  margin: 0 auto;
   border-radius: 99px;
   background: linear-gradient(90deg, transparent, #ef4444, #f97316, #ef4444, transparent);
-  box-shadow: 0 0 14px #ef4444;
+  box-shadow: 0 0 12px #ef4444;
 }
 
-.pda-top-status {
+.zebra-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 0.73rem;
-  color: #94a3b8;
-  padding: 4px 10px;
-  background: rgba(0, 0, 0, 0.45);
-  border-radius: 8px;
-}
-
-.pda-screen {
-  background: #060b13;
-  border: 2px solid #1e3a8a;
-  border-radius: 16px;
-  padding: 15px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.pda-user-box {
-  background: rgba(30, 58, 138, 0.3);
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  border-radius: 11px;
-  padding: 10px 12px;
-}
-
-.pda-field-label {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.75rem;
+  background: #060a12;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid #1e293b;
+  font-size: 0.76rem;
   font-weight: 700;
   color: #7dd3fc;
-  text-transform: uppercase;
-  margin-bottom: 5px;
 }
 
-.pda-input {
+.zebra-close-btn {
+  background: #ef4444;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* TOP: COMPACT SCANNER FORM */
+.zebra-scanner-top {
+  background: #060b14;
+  border: 1.5px solid #1e3a8a;
+  border-radius: 14px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.zebra-row-2col {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 7px;
+}
+
+.zebra-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.zebra-field label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #93c5fd;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.zebra-input {
   width: 100%;
   background: #0f172a;
-  border: 2px solid #334155;
+  border: 1.5px solid #334155;
   color: #ffffff;
-  font-size: 1rem;
+  font-size: 0.92rem;
   font-weight: 700;
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
   outline: none;
   font-family: 'JetBrains Mono', monospace, sans-serif;
-  transition: all 0.15s;
 }
 
-.pda-input:focus {
+.zebra-input:focus {
   border-color: #38bdf8;
-  background: #131f38;
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+  background: #152238;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
 }
 
-.pda-live-lookup {
-  padding: 9px 12px;
-  border-radius: 10px;
-  font-size: 0.78rem;
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px dashed rgba(148, 163, 184, 0.35);
-  color: #cbd5e1;
-  min-height: 44px;
-  display: flex;
-  align-items: center;
+.zebra-qty-ok-row {
+  display: grid;
+  grid-template-columns: 1fr 1.25fr;
+  gap: 8px;
+  align-items: end;
 }
 
-.pda-ok-btn {
-  width: 100%;
-  padding: 13px;
-  border-radius: 12px;
+.zebra-ok-btn {
+  height: 38px;
+  border-radius: 9px;
   border: none;
   background: linear-gradient(135deg, #10b981, #059669);
   color: #ffffff;
-  font-size: 1.02rem;
+  font-size: 0.95rem;
   font-weight: 800;
-  text-transform: uppercase;
   letter-spacing: 0.04em;
   cursor: pointer;
-  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.45);
-  transition: transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.45);
 }
 
-.pda-ok-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 25px rgba(16, 185, 129, 0.6);
+.zebra-ok-btn.editing-mode {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.45);
 }
 
-.pda-ok-btn:active {
-  transform: translateY(1px);
+.zebra-status-strip {
+  font-size: 0.72rem;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.pda-log-panel {
+/* BOTTOM: COMPACT SCAN LOG INSIDE PDA */
+.zebra-log-bottom {
+  background: #060b14;
+  border: 1.5px solid #1e293b;
+  border-radius: 14px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
+  flex: 1;
+  min-height: 210px;
+  max-height: 340px;
   overflow: hidden;
+}
+
+.zebra-log-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px;
+}
+
+.zebra-log-title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #cbd5e1;
+  text-transform: uppercase;
+}
+
+.zebra-mini-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.zebra-btn-xs {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-size: 0.67rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.zebra-btn-xs:hover {
+  border-color: #38bdf8;
+  color: #fff;
+}
+
+.zebra-btn-xs.danger {
+  background: rgba(244, 63, 94, 0.18);
+  border-color: rgba(244, 63, 94, 0.4);
+  color: #fb7185;
+}
+
+.zebra-log-scroll {
+  overflow-y: auto;
+  overflow-x: auto;
+  flex: 1;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+table.zebra-log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.73rem;
+}
+
+table.zebra-log-table th {
+  position: sticky;
+  top: 0;
+  background: #0f172a;
+  color: #94a3b8;
+  padding: 5px 6px;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  border-bottom: 1px solid #1e293b;
+  text-align: left;
+  white-space: nowrap;
+}
+
+table.zebra-log-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  color: #f1f5f9;
+  white-space: nowrap;
+}
+
+.row-action-btn {
+  border: none;
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
+  border-radius: 5px;
+  padding: 2px 5px;
+  font-size: 0.68rem;
+  cursor: pointer;
+  margin-right: 3px;
+}
+
+.row-action-btn.del {
+  background: rgba(244, 63, 94, 0.18);
+  color: #fb7185;
 }
 
 /* Responsive */
@@ -930,10 +1083,6 @@ table.data-table td {
 @media (max-width: 920px) {
   .data-source-grid {
     grid-template-columns: 1fr;
-  }
-  .pda-device-wrapper {
-    grid-template-columns: 1fr;
-    overflow-y: auto;
   }
   .kpi-grid-3d {
     grid-template-columns: repeat(2, 1fr);
