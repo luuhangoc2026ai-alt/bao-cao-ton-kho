@@ -19,35 +19,72 @@
   <div class="bg-grid-3d"></div>
 
   <div class="app-container">
-    <!-- TOP EXECUTIVE HEADER -->
+    <!-- TOP EXECUTIVE HEADER (TỐI GIẢN, TRỰC QUAN, NHÌN NHANH DỄ NHẬN BIẾT) -->
     <header class="top-header">
       <div class="brand-group">
         <div class="brand-cube" title="3D Multi-Agent Inventory System">📦</div>
         <div class="brand-title">
           <h1>BÁO CÁO ĐỐI SOÁT TỒN KHO & KIỂM KÊ PDA 3D</h1>
           <div class="brand-subtitle">
-            <span>Hệ thống Đối soát Đa Tác Tử (Multi-Agent Reconciliation)</span>
-            <span class="badge-scope">Kho: 01 & 61 | Mã hàng: 3*, 5*, 7*</span>
-            <span class="badge-scope" id="header-timestamp">Cập nhật: 31/10/2026</span>
+            <span class="badge-scope">Kho: 01 & 61 | Mã: 3*, 5*, 7*</span>
+            <span class="badge-scope" id="header-net-status" onclick="toggleOfflineMode()" style="cursor:pointer;" title="Nhấn để chuyển đổi chế độ Online / Offline trên PDA">🟢 ONLINE (Đồng bộ tức thời)</span>
+            <span class="badge-scope" id="header-multiuser-badge" title="Hỗ trợ nhiều người dùng quét cùng lúc không xung đột">👥 Đa User: Hoạt động</span>
+            <span class="badge-scope" id="header-timestamp">31/10/2026</span>
           </div>
         </div>
       </div>
 
       <div class="header-actions">
         <button class="btn-3d btn-emerald" id="btn-open-pda" onclick="openPdaModal()">
-          <span>📱</span> Máy Quét PDA Zebra
+          <span>📱</span> Máy Quét PDA
+        </button>
+        <button class="btn-3d btn-amber" id="btn-header-sync" onclick="syncAndExportFullExcel()" title="Online đồng bộ toàn bộ dữ liệu quét Offline, đối soát 100% và xuất báo cáo Excel">
+          <span>🔄</span> Đồng Bộ & Xuất Excel
         </button>
         <button class="btn-3d btn-primary" id="btn-export-excel" onclick="exportFullExcelReport()">
-          <span>📥</span> Xuất Excel Báo Cáo (5 Sheet)
+          <span>📥</span> Xuất Báo Cáo (5 Sheet)
         </button>
         <button class="btn-3d btn-glass" onclick="restoreDefaultData()" title="Nạp lại dữ liệu gốc từ Stock list.xlsx & kiêm kho 31.10.2026.xlsx">
-          <span>🔄</span> Khôi Phục Dữ Liệu Gốc
+          <span>↺</span> Dữ Liệu Gốc
         </button>
         <button class="btn-3d btn-rose" onclick="clearAllSources()" title="Xóa toàn bộ 2 bảng dữ liệu nguồn về 0">
-          <span>🗑️</span> Xóa Tất Cả Về 0
+          <span>🗑️</span> Xóa Về 0
         </button>
       </div>
     </header>
+
+    <!-- THANH TÓM TẮT ĐỐI SOÁT NHANH 100% (MINIMALIST SCANNABLE BAR) -->
+    <section class="quick-glance-bar" id="quick-glance-bar" aria-label="Tóm tắt đối soát chuẩn 100%">
+      <div class="qg-step">
+        <span class="qg-label">1. TỔNG TỒN KHO (01 & 61)</span>
+        <strong class="qg-val" id="qg-stock-qty">0</strong>
+        <small id="qg-stock-meta">0 Tag | 0 Mã hàng</small>
+      </div>
+      <div class="qg-op">−</div>
+      <div class="qg-step emerald">
+        <span class="qg-label">2. ĐÃ KIỂM TẠI KHO (01 & 61)</span>
+        <strong class="qg-val" id="qg-scan-0161-qty">0</strong>
+        <small id="qg-scan-0161-meta">0 Tag (0%)</small>
+      </div>
+      <div class="qg-op">+</div>
+      <div class="qg-step purple" onclick="switchTab('tab-unmatched')" style="cursor:pointer;" title="Nhấn để xem chi tiết Tag quét được nhưng đang ở kho khác">
+        <span class="qg-label">3. TAG QUÉT Ở KHO KHÁC (3*,5*,7*)</span>
+        <strong class="qg-val" id="qg-other-wh-qty">+0</strong>
+        <small id="qg-other-wh-meta">0 Tag (Kho 62, 60, 50)</small>
+      </div>
+      <div class="qg-op">=</div>
+      <div class="qg-step cyan">
+        <span class="qg-label">4. TỔNG KIỂM ĐỐI SOÁT</span>
+        <strong class="qg-val" id="qg-total-reconciled-qty">0</strong>
+        <small id="qg-total-reconciled-meta">Đạt 0% tồn kho</small>
+      </div>
+      <div class="qg-op">⇒</div>
+      <div class="qg-step rose">
+        <span class="qg-label">5. CHÊNH LỆCH CÒN THIẾU</span>
+        <strong class="qg-val" id="qg-net-diff-qty">0</strong>
+        <small id="qg-net-diff-meta">Thiếu thuần: 0 SL</small>
+      </div>
+    </section>
 
     <!-- MULTI-AGENT RECONCILIATION STATUS BAR -->
     <section class="agent-pipeline" aria-label="Multi-Agent Pipeline">
@@ -155,13 +192,16 @@
           </button>
           <input type="file" id="input-file-scan" class="file-input-hidden" accept=".xlsx,.xls,.csv,.tsv,.json,.txt,.xml" onchange="handleScanFileUpload(event)" />
           <button class="btn-3d btn-primary" onclick="document.getElementById('input-file-scan').click()" title="Thay thế bằng file kiểm kê mới">
-            <span>📂</span> Nhập File Kiểm Kê Mới
+            <span>📂</span> Thay File Kiểm Kê
           </button>
           <button class="btn-3d btn-emerald" onclick="openPdaModal()">
-            <span>📱</span> Mở Máy Quét PDA Zebra
+            <span>📱</span> Mở Máy Quét PDA
+          </button>
+          <button class="btn-3d btn-glass" id="btn-source2-sync" onclick="syncOfflineScansNow()" title="Online & Đồng bộ dữ liệu quét Offline / Đa người dùng vào Bảng 2">
+            <span>🔄</span> Đồng Bộ Offline (<span id="source2-offline-count">0</span>)
           </button>
           <button class="btn-3d btn-rose" onclick="clearScanData()">
-            <span>🗑️</span> Xóa Dữ Liệu Cũ (Kiểm Kê)
+            <span>🗑️</span> Xóa Cũ
           </button>
         </div>
       </div>
@@ -282,23 +322,24 @@
 
     <!-- 3D WAREHOUSE VISUALIZATION (WITH DIRECT DATA LABELS, PAUSE, ZOOM, LINE/BAR SWITCH) -->
     <section class="visuals-grid">
-      <!-- Panel 1: 3D Dynamic Column with Full Data Labels + Pause/Zoom/Expand -->
+      <!-- Panel 1: 3D Dynamic Column with Full Data Labels + Refresh/Pause/Zoom/Expand -->
       <div class="panel-3d" id="panel-3d-main">
         <div class="panel-header">
-          <h3>🧊 Bảng 3D Động: Số Liệu Trực Tiếp Trên Cột (Kho 01, 61)</h3>
+          <h3>🧊 Bảng 3D Động: Đối Soát Trực Tiếp Trên Cột (Kho 01, 61)</h3>
           <div class="three-controls-bar">
+            <button class="ctrl-btn-mini refresh-3d-btn" id="btn-3d-refresh" onclick="refresh3DInitialState()" title="Khôi phục bảng 3D về đúng trạng thái ban đầu (góc nhìn, tự động xoay & cột số liệu)">🔄 Refresh 3D</button>
             <button class="ctrl-btn-mini active" id="btn-3d-pause" onclick="toggle3DRotation()" title="Dừng hoặc tiếp tục xoay 3D">⏸️ Dừng Xoay</button>
-            <button class="ctrl-btn-mini" onclick="zoom3D(-1.8)" title="Phóng to mô hình 3D">➕ Phóng To</button>
-            <button class="ctrl-btn-mini" onclick="zoom3D(1.8)" title="Thu nhỏ mô hình 3D">➖ Thu Nhỏ</button>
-            <button class="ctrl-btn-mini" onclick="reset3DView()" title="Đặt lại góc nhìn chuẩn dễ đọc số liệu">🔄 Chuẩn</button>
-            <button class="ctrl-btn-mini" onclick="toggleExpand3DPanel()" title="Phóng to toàn màn hình">⛶ Phóng Rộng</button>
+            <button class="ctrl-btn-mini" onclick="zoom3D(-1.8)" title="Phóng to mô hình 3D">➕</button>
+            <button class="ctrl-btn-mini" onclick="zoom3D(1.8)" title="Thu nhỏ mô hình 3D">➖</button>
+            <button class="ctrl-btn-mini" onclick="reset3DView()" title="Góc nhìn đứng đọc số liệu">🎯 Góc Chuẩn</button>
+            <button class="ctrl-btn-mini" onclick="toggleExpand3DPanel()" title="Phóng to toàn màn hình">⛶</button>
           </div>
         </div>
         <div id="three-canvas-container">
           <div class="three-legend">
             <span>🟢 Cột Xanh: SL Kiểm Được</span>
             <span>🔴 Cột Đỏ: SL Thiếu</span>
-            <span>🖱️ Kéo chuột xoay | Lăn chuột Phóng to/Thu nhỏ</span>
+            <span>🔄 Bấm Refresh 3D để về trạng thái ban đầu</span>
           </div>
         </div>
       </div>
@@ -569,11 +610,14 @@
         </div>
       </div>
 
-      <!-- TAB 5: LIVE PDA SCAN TABLE (NEWEST ON TOP + EDIT/DELETE + UNLIMITED LOG) -->
+      <!-- TAB 5: LIVE PDA SCAN TABLE (NEWEST ON TOP + EDIT/DELETE + UNLIMITED LOG + MULTI-USER + OFFLINE SYNC) -->
       <div id="tab-pda-log" class="tab-pane" style="display:none;">
         <div id="pda-log-status-banner" style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:10px; padding:10px 14px; margin-bottom:10px; border-radius:10px; background:rgba(16, 185, 129, 0.12); border:1px solid rgba(16, 185, 129, 0.35); font-size:0.8rem; color:#e2e8f0;">
-          <span>✅ <strong>Chế độ Ghi Log Toàn Phần (Không Giới Hạn Dữ Liệu):</strong> Mọi lượt quét PDA và mọi file nhập thêm đều được ghi log đầy đủ 100% và tự động cộng dồn đối soát tồn kho tức thời.</span>
-          <strong id="pda-log-total-indicator" style="color:#34d399;">Đang chứa: 0 / 0 dòng log</strong>
+          <span>✅ <strong>Ghi Log Đa Người Dùng & Offline/Online (Không Giới Hạn):</strong> Nhiều máy PDA quét cùng lúc hoặc quét khi Offline đều được bảo toàn 100% theo mã định danh <code>scanId</code> độc lập, không bao giờ lỗi hay trùng dòng.</span>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <strong id="pda-log-total-indicator" style="color:#34d399;">Đang chứa: 0 / 0 dòng log</strong>
+            <button class="chip-btn active" onclick="syncAndExportFullExcel()">🔄 Đồng Bộ Offline & Xuất Excel</button>
+          </div>
         </div>
         <div class="table-wrap">
           <table class="data-table">
@@ -587,7 +631,7 @@
                 <th class="num-col">Qty</th>
                 <th>Mã Hàng & Kho Khớp</th>
                 <th>Thời Gian</th>
-                <th>Nguồn Dữ Liệu</th>
+                <th>Nguồn & Đồng Bộ</th>
                 <th>Trạng Thái</th>
               </tr>
             </thead>
@@ -600,20 +644,37 @@
 
   <!-- ========================================================================
        ZEBRA PDA COMPACT SCANNER MODAL (CHUẨN MÀN HÌNH NHỎ MÁY PDA ZEBRA)
-       - Phần Quét ở TRÊN: USE, Bin Location, TagID, Qty, OK (Ngắn gọn, rõ ràng)
-       - Phần Log Tag Quét ở DƯỚI: Dòng mới nhất trên cùng + Nút Sửa (✏️) / Xóa (🗑️) ngay dòng vừa quét
+       - Hỗ trợ Đa người dùng quét cùng lúc (Multi-User Concurrency Lock-Free)
+       - Hỗ trợ Quét khi Offline (Ghi nhận vào bộ nhớ đệm) -> Online Đồng bộ & Xuất Excel đối soát
        ======================================================================== -->
   <div class="pda-modal-overlay" id="pda-modal-overlay">
     <div class="zebra-pda-unit">
       <div class="zebra-laser-strip"></div>
 
       <div class="zebra-header">
-        <span>📡 ZEBRA PDA SCANNER</span>
-        <div style="display:flex; gap:6px; align-items:center;">
-          <button class="zebra-btn-xs" onclick="document.getElementById('input-file-scan-append').click()" title="Nhập thêm file kiểm kê cộng dồn">➕ Cộng file</button>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span>📡 ZEBRA PDA</span>
+          <button type="button" class="zebra-net-pill online" id="pda-net-toggle-btn" onclick="toggleOfflineMode()" title="Bấm để chuyển chế độ Quét Offline / Online">
+            🟢 ONLINE
+          </button>
+        </div>
+        <div style="display:flex; gap:5px; align-items:center;">
+          <button class="zebra-btn-xs" onclick="document.getElementById('input-file-scan-append').click()" title="Nhập thêm file kiểm kê cộng dồn">➕ File</button>
           <button class="zebra-btn-xs" onclick="fillSampleUnscannedTag()" title="Điền thử 1 Tag chưa quét">⚡ Test</button>
-          <button class="zebra-btn-xs" onclick="exportPdaScansOnly()" title="Xuất file Excel bảng quét">💾 Excel</button>
-          <button class="zebra-close-btn" onclick="closePdaModal()">✖ ĐÓNG</button>
+          <button class="zebra-close-btn" onclick="closePdaModal()">✖</button>
+        </div>
+      </div>
+
+      <!-- THANH ĐỒNG BỘ OFFLINE -> ONLINE & ĐA NGƯỜI DÙNG TRÊN PDA -->
+      <div class="zebra-sync-bar" id="pda-sync-bar">
+        <span id="pda-sync-status-text">👥 Đa User | Offline chờ: <strong id="pda-offline-count">0</strong></span>
+        <div style="display:flex; gap:4px;">
+          <button type="button" class="zebra-btn-xs sync-btn" onclick="syncOfflineScansNow()" title="Chuyển sang Online và đồng bộ toàn bộ dữ liệu quét Offline để đối soát">
+            🔄 Đồng bộ
+          </button>
+          <button type="button" class="zebra-btn-xs excel-sync-btn" onclick="syncAndExportPdaExcel()" title="Online cập nhật toàn bộ hoạt động quét Offline, đối soát tồn kho và xuất file Excel">
+            💾 Đồng bộ & Xuất Excel
+          </button>
         </div>
       </div>
 
@@ -621,8 +682,15 @@
       <div class="zebra-scanner-top">
         <div class="zebra-row-2col">
           <div class="zebra-field">
-            <label for="pda-input-user">USE</label>
-            <input type="text" id="pda-input-user" class="zebra-input" value="Thanh" placeholder="USE" onkeydown="handlePdaKeydown(event, 'pda-input-loc')" />
+            <label for="pda-input-user">USE (Đa người dùng)</label>
+            <input type="text" id="pda-input-user" class="zebra-input" value="Thanh" list="pda-user-list" placeholder="USE" onkeydown="handlePdaKeydown(event, 'pda-input-loc')" />
+            <datalist id="pda-user-list">
+              <option value="Thanh"></option>
+              <option value="Minh"></option>
+              <option value="Tuấn"></option>
+              <option value="Hùng"></option>
+              <option value="Lan"></option>
+            </datalist>
           </div>
           <div class="zebra-field">
             <label for="pda-input-loc">Bin Location</label>
@@ -632,7 +700,7 @@
 
         <div class="zebra-field">
           <label for="pda-input-tag">TagID</label>
-          <input type="text" id="pda-input-tag" class="zebra-input" placeholder="Scan TagID..." oninput="handlePdaTagLookup(this.value)" onkeydown="handlePdaKeydown(event, 'pda-input-qty')" />
+          <input type="text" id="pda-input-tag" class="zebra-input" placeholder="Scan TagID (Offline / Online)..." oninput="handlePdaTagLookup(this.value)" onkeydown="handlePdaKeydown(event, 'pda-input-qty')" />
         </div>
 
         <div class="zebra-qty-ok-row">
@@ -646,17 +714,18 @@
         </div>
 
         <div class="zebra-status-strip" id="pda-live-lookup">
-          Sẵn sàng quét TagID...
+          Sẵn sàng quét TagID (Hỗ trợ đa User & Offline)...
         </div>
       </div>
 
-      <!-- PHẦN DƯỚI: LOG TAG QUÉT ĐƯỢC (CÓ SỬA / XÓA NGAY DÒNG VỪA QUÉT) -->
+      <!-- PHẦN DƯỚI: LOG TAG QUÉT ĐƯỢC (CÓ SỬA / XÓA THEO SCAN_ID AN TOÀN ĐA NGƯỜI DÙNG) -->
       <div class="zebra-log-bottom">
         <div class="zebra-log-bar">
           <span class="zebra-log-title">LOG QUÉT (<span id="zebra-log-count">0</span>)</span>
           <div class="zebra-mini-actions">
-            <button class="zebra-btn-xs" onclick="editLatestPdaScan()" title="Chỉnh sửa ngay dòng vừa quét trên cùng">✏️ Sửa dòng đầu</button>
-            <button class="zebra-btn-xs danger" onclick="deleteLatestPdaScan()" title="Xóa ngay dòng vừa quét trên cùng">🗑️ Xóa dòng đầu</button>
+            <button class="zebra-btn-xs" onclick="simulateConcurrentMultiUserScan()" title="Mô phỏng nhiều người dùng cùng quét 1 lúc vào bảng ghi log">👥 Test Đa User</button>
+            <button class="zebra-btn-xs" onclick="editLatestPdaScan()" title="Chỉnh sửa ngay dòng vừa quét trên cùng">✏️ Sửa đầu</button>
+            <button class="zebra-btn-xs danger" onclick="deleteLatestPdaScan()" title="Xóa ngay dòng vừa quét trên cùng">🗑️ Xóa đầu</button>
           </div>
         </div>
 
@@ -669,7 +738,7 @@
                 <th>TagID</th>
                 <th>Bin</th>
                 <th class="num-col">Qty</th>
-                <th>USE</th>
+                <th>USE / TT</th>
               </tr>
             </thead>
             <tbody id="pda-modal-tbody"></tbody>

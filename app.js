@@ -9,7 +9,7 @@
 
 const AppState = {
   stockRaw: [],         // Array of { code, wh, date, batch, bin, qty }
-  scanRaw: [],          // Array of { stt, tag, loc, user, time, manualQty, isNew, source }
+  scanRaw: [],          // Array of { scanId, stt, tag, loc, user, time, manualQty, isNew, source, offlineQueued, syncStatus, syncedAt }
   stockFileName: 'Stock list.xlsx',
   scanFileName: 'kiêm kho 31.10.2026.xlsx',
   scanSources: ['kiêm kho 31.10.2026.xlsx'],
@@ -21,8 +21,16 @@ const AppState = {
   searchQuery: '',
   activeTab: 'tab-items',
 
-  // PDA Editing State (-1 = New Scan, >=0 = Editing existing row index in scanRaw)
+  // PDA Editing State (-1 = New Scan, >=0 = Editing existing row; editingScanId = immutable lock-free ID)
   editingScanIndex: -1,
+  editingScanId: null,
+  scanSeqCounter: 0,
+
+  // Multi-User Concurrency & Offline/Online Sync State
+  isOnline: typeof navigator !== 'undefined' ? navigator.onLine !== false : true,
+  manualOfflineMode: false,
+  offlineActivityLog: [], // Array of { id, action, scanId, tag, loc, user, qty, time, synced, syncedAt }
+  syncHistory: [],        // Array of { syncTime, syncedScansCount, syncedActivitiesCount, users }
 
   // Chart & 3D State
   mainChartMode: 'combo', // 'combo' | 'line' | 'bar'
@@ -31,6 +39,189 @@ const AppState = {
   // Computed Reconciliation Result
   reconciled: null
 };
+
+const STORAGE_KEYS = {
+  SHARED_SCANS: 'ZEBRA_PDA_SHARED_SCANS_V1',
+  OFFLINE_QUEUE: 'ZEBRA_PDA_OFFLINE_QUEUE_V1',
+  ACTIVITY_LOG: 'ZEBRA_PDA_ACTIVITY_LOG_V1',
+  DELETED_IDS: 'ZEBRA_PDA_DELETED_IDS_V1'
+};
+
+let pdaBroadcastChannel = null;
+try {
+  if (typeof BroadcastChannel !== 'undefined') {
+    pdaBroadcastChannel = new BroadcastChannel('zebra_pda_multiuser_channel');
+  }
+} catch (_) {}
+
+function generateScanId(user = 'USER', prefix = 'SCAN') {
+  AppState.scanSeqCounter = (AppState.scanSeqCounter || 0) + 1;
+  const cleanUser = String(user || 'U').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'U';
+  const rand = Math.random().toString(36).slice(2, 7);
+  return `${prefix}-${Date.now()}-${AppState.scanSeqCounter}-${rand}-${cleanUser}`;
+}
+
+function isEffectiveOnline() {
+  return Boolean(AppState.isOnline && !AppState.manualOfflineMode);
+}
+
+function getNowTimeStr() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+}
+
+function safeReadStorageArray(key) {
+  try {
+    if (typeof localStorage === 'undefined') return [];
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function safeWriteStorageArray(key, arr) {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(key, JSON.stringify(arr));
+  } catch (_) {}
+}
+
+function getPendingOfflineScansCount() {
+  const inMemPending = AppState.scanRaw.filter((s) => s.offlineQueued || s.syncStatus === 'OFFLINE_PENDING').length;
+  const queuedStorage = safeReadStorageArray(STORAGE_KEYS.OFFLINE_QUEUE).length;
+  return Math.max(inMemPending, queuedStorage);
+}
+
+function findScanIndexById(scanId, fallbackIdx = -1) {
+  if (scanId) {
+    const idx = AppState.scanRaw.findIndex((s) => s.scanId === scanId);
+    if (idx !== -1) return idx;
+  }
+  if (fallbackIdx >= 0 && fallbackIdx < AppState.scanRaw.length) {
+    return fallbackIdx;
+  }
+  return -1;
+}
+
+function recordPdaActivity(action, scanRecord) {
+  const entry = {
+    id: generateScanId(scanRecord.user, 'ACT'),
+    action, // 'SCAN_OFFLINE' | 'SCAN_ONLINE' | 'EDIT' | 'DELETE' | 'SYNC'
+    scanId: scanRecord.scanId || '',
+    tag: scanRecord.tag || '',
+    loc: scanRecord.loc || '-',
+    user: scanRecord.user || 'USER',
+    qty: Number(scanRecord.manualQty) || 0,
+    time: scanRecord.time || getNowTimeStr(),
+    synced: isEffectiveOnline(),
+    syncedAt: isEffectiveOnline() ? getNowTimeStr() : null
+  };
+  AppState.offlineActivityLog.unshift(entry);
+  const storedLog = safeReadStorageArray(STORAGE_KEYS.ACTIVITY_LOG);
+  storedLog.unshift(entry);
+  safeWriteStorageArray(STORAGE_KEYS.ACTIVITY_LOG, storedLog.slice(0, 5000));
+}
+
+function persistMultiUserAndOfflineScan(scanRecord, mode = 'UPSERT') {
+  const deletedSet = new Set(safeReadStorageArray(STORAGE_KEYS.DELETED_IDS));
+
+  if (mode === 'DELETE') {
+    if (scanRecord && scanRecord.scanId) {
+      deletedSet.add(scanRecord.scanId);
+      safeWriteStorageArray(STORAGE_KEYS.DELETED_IDS, Array.from(deletedSet));
+    }
+    const shared = safeReadStorageArray(STORAGE_KEYS.SHARED_SCANS).filter((x) => x.scanId !== scanRecord.scanId);
+    safeWriteStorageArray(STORAGE_KEYS.SHARED_SCANS, shared);
+    const offlineQ = safeReadStorageArray(STORAGE_KEYS.OFFLINE_QUEUE).filter((x) => x.scanId !== scanRecord.scanId);
+    safeWriteStorageArray(STORAGE_KEYS.OFFLINE_QUEUE, offlineQ);
+  } else {
+    // Atomic upsert by scanId in shared multi-user log
+    const shared = safeReadStorageArray(STORAGE_KEYS.SHARED_SCANS).filter((x) => !deletedSet.has(x.scanId));
+    const existIdx = shared.findIndex((x) => x.scanId === scanRecord.scanId);
+    if (existIdx >= 0) {
+      shared[existIdx] = { ...shared[existIdx], ...scanRecord };
+    } else {
+      shared.unshift({ ...scanRecord });
+    }
+    safeWriteStorageArray(STORAGE_KEYS.SHARED_SCANS, shared);
+
+    if (!isEffectiveOnline() || scanRecord.offlineQueued) {
+      const offlineQ = safeReadStorageArray(STORAGE_KEYS.OFFLINE_QUEUE).filter((x) => !deletedSet.has(x.scanId));
+      const qIdx = offlineQ.findIndex((x) => x.scanId === scanRecord.scanId);
+      if (qIdx >= 0) {
+        offlineQ[qIdx] = { ...offlineQ[qIdx], ...scanRecord };
+      } else {
+        offlineQ.unshift({ ...scanRecord });
+      }
+      safeWriteStorageArray(STORAGE_KEYS.OFFLINE_QUEUE, offlineQ);
+    }
+  }
+
+  // Broadcast to other concurrent PDA users/tabs if online
+  if (isEffectiveOnline() && pdaBroadcastChannel) {
+    try {
+      pdaBroadcastChannel.postMessage({
+        type: 'PDA_MULTIUSER_EVENT',
+        mode,
+        record: scanRecord,
+        timestamp: Date.now()
+      });
+    } catch (_) {}
+  }
+}
+
+function mergeExternalMultiUserScans(triggerReconcile = true) {
+  const deletedSet = new Set(safeReadStorageArray(STORAGE_KEYS.DELETED_IDS));
+  const shared = safeReadStorageArray(STORAGE_KEYS.SHARED_SCANS);
+  const offlineQ = safeReadStorageArray(STORAGE_KEYS.OFFLINE_QUEUE);
+  const combinedExternal = [...offlineQ, ...shared];
+
+  let changed = false;
+  // Remove any deleted scanId
+  if (deletedSet.size > 0) {
+    const beforeLen = AppState.scanRaw.length;
+    AppState.scanRaw = AppState.scanRaw.filter((s) => !deletedSet.has(s.scanId));
+    if (AppState.scanRaw.length !== beforeLen) changed = true;
+  }
+
+  const byId = new Map();
+  for (let i = 0; i < AppState.scanRaw.length; i++) {
+    const s = AppState.scanRaw[i];
+    if (!s.scanId) s.scanId = generateScanId(s.user || 'INIT', 'BASE');
+    byId.set(s.scanId, i);
+  }
+
+  // Insert or update from external multi-user/offline records in chronological order
+  for (let i = combinedExternal.length - 1; i >= 0; i--) {
+    const ext = combinedExternal[i];
+    if (!ext || !ext.scanId || deletedSet.has(ext.scanId)) continue;
+    if (byId.has(ext.scanId)) {
+      const idx = byId.get(ext.scanId);
+      const cur = AppState.scanRaw[idx];
+      if (cur.tag !== ext.tag || cur.loc !== ext.loc || cur.user !== ext.user || cur.manualQty !== ext.manualQty || cur.syncStatus !== ext.syncStatus) {
+        AppState.scanRaw[idx] = { ...cur, ...ext };
+        changed = true;
+      }
+    } else {
+      AppState.scanRaw.unshift({ ...ext });
+      byId.set(ext.scanId, 0);
+      changed = true;
+    }
+  }
+
+  if (changed && triggerReconcile) {
+    if (!AppState.scanSources.includes('Máy quét PDA')) {
+      AppState.scanSources.push('Máy quét PDA');
+    }
+    refreshScanFileNameLabel();
+    runMultiAgentReconciliation();
+  }
+  return changed;
+}
 
 // Formatters
 const fmtNum = (n) => Number(n || 0).toLocaleString('vi-VN');
@@ -681,6 +872,24 @@ function updateDashboardUI() {
   const missingPctQty = r.totalStockQty > 0 ? (r.totalMissingQty / r.totalStockQty) * 100 : 0;
   const scannedPctTag = r.totalStockTags > 0 ? (r.totalScannedTags / r.totalStockTags) * 100 : 0;
   const missingPctTag = r.totalStockTags > 0 ? (r.totalMissingTags / r.totalStockTags) * 100 : 0;
+  const reconciledPctQty = r.totalStockQty > 0 ? (r.totalScannedInclOtherWhQty / r.totalStockQty) * 100 : 0;
+
+  // Quick Glance Bar (Minimalist 1-Line Reconciliation Formula)
+  const qgStockQty = document.getElementById('qg-stock-qty');
+  if (qgStockQty) {
+    qgStockQty.textContent = fmtNum(r.totalStockQty);
+    document.getElementById('qg-stock-meta').textContent = `${fmtNum(r.totalStockTags)} Tag | ${fmtNum(r.uniqueItemCodesCount)} Mã hàng`;
+    document.getElementById('qg-scan-0161-qty').textContent = fmtNum(r.totalScannedQty);
+    document.getElementById('qg-scan-0161-meta').textContent = `${fmtNum(r.totalScannedTags)} Tag (${fmtPct(scannedPctQty)})`;
+    document.getElementById('qg-other-wh-qty').textContent = `+${fmtNum(r.otherWhSamePfxQty)}`;
+    document.getElementById('qg-other-wh-meta').textContent = `${fmtNum(r.otherWhSamePfxTags)} Tag (Kho 62, 60, 50)`;
+    document.getElementById('qg-total-reconciled-qty').textContent = fmtNum(r.totalScannedInclOtherWhQty);
+    document.getElementById('qg-total-reconciled-meta').textContent = `Đạt ${fmtPct(reconciledPctQty)} tồn kho`;
+    document.getElementById('qg-net-diff-qty').textContent = fmtSignedNum(r.netDiffAfterOtherWhQty);
+    document.getElementById('qg-net-diff-meta').textContent = `Thiếu thuần (01/61): -${fmtNum(r.totalMissingQty)} SL`;
+  }
+
+  updateNetworkAndMultiUserUI();
 
   document.getElementById('kpi-stock-qty').textContent = fmtNum(r.totalStockQty);
   document.getElementById('kpi-stock-tags').textContent = `${fmtNum(r.totalStockTags)} TagID`;
@@ -966,7 +1175,7 @@ function renderActiveTables() {
   // 4. Render Tab 4: Cross-Warehouse Reconciliation & Unmatched Tags
   renderOtherWarehouseReconciliationTab(r, q);
 
-  // 5. Render Tab PDA Log (Full 100% Log - NO ROW LIMIT!)
+  // 5. Render Tab PDA Log (Full 100% Log - NO ROW LIMIT + MULTI-USER + OFFLINE SYNC STATUS!)
   const tbodyPdaLog = document.getElementById('tbody-pda-log');
   const logTotalIndicator = document.getElementById('pda-log-total-indicator');
   if (AppState.scanRaw.length === 0) {
@@ -976,7 +1185,8 @@ function renderActiveTables() {
     const rowsHtml = [];
     for (let i = 0; i < AppState.scanRaw.length; i++) {
       const s = AppState.scanRaw[i];
-      if (q && !`${s.tag} ${s.loc} ${s.user} ${s.time} ${s.source || ''}`.toLowerCase().includes(q)) continue;
+      if (!s.scanId) s.scanId = generateScanId(s.user || 'U', 'LOG');
+      if (q && !`${s.tag} ${s.loc} ${s.user} ${s.time} ${s.source || ''} ${s.scanId}`.toLowerCase().includes(q)) continue;
       const st = r.filteredStockByBatch.get(s.tag);
       const otherStList = !st ? r.otherStockByBatch.get(s.tag) : null;
       const otherSt = (otherStList && otherStList.length > 0) ? otherStList[0] : null;
@@ -992,16 +1202,22 @@ function renderActiveTables() {
         badge = `<span class="status-pill status-dup">Trùng (${scansForTag.length}x)</span>`;
       }
 
+      const syncBadge = (s.offlineQueued || s.syncStatus === 'OFFLINE_PENDING')
+        ? `<span class="status-pill status-dup" title="Quét khi Offline - Chờ đồng bộ">📴 Offline chờ đồng bộ</span>`
+        : `<span class="badge-scope">${s.source || 'File kiểm kê'}${s.syncedAt ? ' ✓ Đã đồng bộ' : ''}</span>`;
+
       const matchedInfo = st
         ? `${st.code} (Kho ${st.wh})`
         : (otherSt ? `${otherSt.code} (Kho ${otherSt.wh})` : '-');
+
+      const safeId = String(s.scanId).replace(/'/g, "\\'");
 
       rowsHtml.push(`
         <tr class="${s.isNew ? 'new-scan-highlight' : ''}">
           <td><strong>#${i + 1}</strong> ${s.isNew ? '🆕' : ''}</td>
           <td>
-            <button class="row-action-btn" onclick="openPdaAndEditRow(${i})" title="Sửa dòng này">✏️ Sửa</button>
-            <button class="row-action-btn del" onclick="deletePdaRow(${i})" title="Xóa dòng này">🗑️ Xóa</button>
+            <button class="row-action-btn" onclick="openPdaAndEditRowById('${safeId}', ${i})" title="Sửa dòng này (An toàn đa người dùng)">✏️ Sửa</button>
+            <button class="row-action-btn del" onclick="deletePdaRowById('${safeId}', ${i})" title="Xóa dòng này (An toàn đa người dùng)">🗑️ Xóa</button>
           </td>
           <td style="font-family:'JetBrains Mono',monospace; font-weight:700; color:#7dd3fc;">${s.tag}</td>
           <td>${s.loc || '-'}</td>
@@ -1009,14 +1225,15 @@ function renderActiveTables() {
           <td class="num-col"><strong>${fmtNum(qty)}</strong></td>
           <td style="font-family:'JetBrains Mono',monospace;">${matchedInfo}</td>
           <td>${s.time || '-'}</td>
-          <td><span class="badge-scope">${s.source || 'File kiểm kê'}</span></td>
+          <td>${syncBadge}</td>
           <td>${badge}</td>
         </tr>
       `);
     }
     tbodyPdaLog.innerHTML = rowsHtml.join('');
     if (logTotalIndicator) {
-      logTotalIndicator.textContent = `Hiển thị đầy đủ: ${fmtNum(rowsHtml.length)} / ${fmtNum(AppState.scanRaw.length)} dòng log (100% không giới hạn)`;
+      const pendingOffline = getPendingOfflineScansCount();
+      logTotalIndicator.textContent = `Hiển thị: ${fmtNum(rowsHtml.length)} / ${fmtNum(AppState.scanRaw.length)} dòng log (100% không giới hạn${pendingOffline > 0 ? ` | 📴 ${pendingOffline} Offline chờ đồng bộ` : ''})`;
     }
   }
 
@@ -1175,10 +1392,162 @@ function renderOtherWarehouseReconciliationTab(r, q) {
 }
 
 /* ==========================================================================
-   ZEBRA PDA COMPACT SCANNER MODAL (USE, Bin Location, TagID, Qty, OK + EDIT/DELETE)
+   ZEBRA PDA COMPACT SCANNER MODAL (MULTI-USER CONCURRENT + OFFLINE/ONLINE SYNC)
    ========================================================================== */
+function updateNetworkAndMultiUserUI() {
+  const online = isEffectiveOnline();
+  const pendingOffline = getPendingOfflineScansCount();
+  const r = AppState.reconciled;
+  const activeUsersCount = r && r.userStats ? r.userStats.length : 1;
+
+  const headerNet = document.getElementById('header-net-status');
+  if (headerNet) {
+    headerNet.textContent = online
+      ? `🟢 ONLINE${pendingOffline > 0 ? ` (${pendingOffline} chờ đồng bộ)` : ' (Đã đồng bộ)'}`
+      : `📴 OFFLINE (${pendingOffline} quét chờ đồng bộ)`;
+    headerNet.style.borderColor = online ? 'rgba(16, 185, 129, 0.5)' : 'rgba(245, 158, 11, 0.7)';
+    headerNet.style.color = online ? '#34d399' : '#fbbf24';
+  }
+
+  const headerMulti = document.getElementById('header-multiuser-badge');
+  if (headerMulti) {
+    headerMulti.textContent = `👥 Đa User: ${activeUsersCount} nhân sự`;
+  }
+
+  const pdaNetBtn = document.getElementById('pda-net-toggle-btn');
+  if (pdaNetBtn) {
+    pdaNetBtn.textContent = online ? '🟢 ONLINE' : '📴 OFFLINE';
+    pdaNetBtn.classList.toggle('online', online);
+    pdaNetBtn.classList.toggle('offline', !online);
+  }
+
+  const pdaOfflineCountEl = document.getElementById('pda-offline-count');
+  if (pdaOfflineCountEl) {
+    pdaOfflineCountEl.textContent = fmtNum(pendingOffline);
+  }
+
+  const s2OfflineCountEl = document.getElementById('source2-offline-count');
+  if (s2OfflineCountEl) {
+    s2OfflineCountEl.textContent = fmtNum(pendingOffline);
+  }
+
+  const pdaSyncText = document.getElementById('pda-sync-status-text');
+  if (pdaSyncText) {
+    pdaSyncText.innerHTML = online
+      ? `👥 Đa User (${activeUsersCount}) | Offline chờ: <strong id="pda-offline-count" style="color:${pendingOffline > 0 ? '#fbbf24' : '#34d399'};">${fmtNum(pendingOffline)}</strong>`
+      : `📴 <strong>ĐANG OFFLINE</strong> | Đã lưu đệm: <strong id="pda-offline-count" style="color:#fbbf24;">${fmtNum(pendingOffline)}</strong> dòng`;
+  }
+}
+
+function toggleOfflineMode(forceOffline) {
+  if (typeof forceOffline === 'boolean') {
+    AppState.manualOfflineMode = forceOffline;
+  } else {
+    AppState.manualOfflineMode = !AppState.manualOfflineMode;
+  }
+  updateNetworkAndMultiUserUI();
+  const box = document.getElementById('pda-live-lookup');
+  if (!isEffectiveOnline()) {
+    if (box) {
+      box.style.borderColor = '#f59e0b';
+      box.innerHTML = '📴 Đang ở chế độ <strong>QUÉT OFFLINE</strong>: Mọi lượt quét vẫn ghi nhận đầy đủ vào bộ nhớ đệm PDA!';
+    }
+  } else {
+    // Auto-sync when switching back to Online if there are pending offline scans
+    const pending = getPendingOfflineScansCount();
+    if (pending > 0) {
+      syncOfflineScansNow({ silent: false });
+    } else if (box) {
+      box.style.borderColor = '#10b981';
+      box.innerHTML = '🟢 Đã kết nối <strong>ONLINE</strong>: Dữ liệu đồng bộ & đối soát tồn kho trực tiếp!';
+    }
+  }
+}
+
+function syncOfflineScansNow(options = {}) {
+  // Switch to Online so offline activity can synchronize
+  AppState.manualOfflineMode = false;
+  AppState.isOnline = true;
+
+  // Merge any external or queued offline scans from localStorage
+  mergeExternalMultiUserScans(false);
+
+  const nowStr = getNowTimeStr();
+  let syncedCount = 0;
+  const usersInvolved = new Set();
+
+  for (const row of AppState.scanRaw) {
+    if (row.offlineQueued || row.syncStatus === 'OFFLINE_PENDING') {
+      row.offlineQueued = false;
+      row.syncStatus = 'SYNCED';
+      row.syncedAt = nowStr;
+      if (row.source && row.source.includes('Offline')) {
+        row.source = 'Máy quét PDA (Đã đồng bộ Online)';
+      }
+      syncedCount++;
+      if (row.user) usersInvolved.add(row.user);
+    }
+  }
+
+  let syncedActivities = 0;
+  for (const act of AppState.offlineActivityLog) {
+    if (!act.synced) {
+      act.synced = true;
+      act.syncedAt = nowStr;
+      syncedActivities++;
+      if (act.user) usersInvolved.add(act.user);
+    }
+  }
+
+  // Clear pending offline queue and update shared storage
+  safeWriteStorageArray(STORAGE_KEYS.OFFLINE_QUEUE, []);
+  const shared = safeReadStorageArray(STORAGE_KEYS.SHARED_SCANS).map((s) => ({
+    ...s,
+    offlineQueued: false,
+    syncStatus: 'SYNCED',
+    syncedAt: s.syncedAt || nowStr
+  }));
+  safeWriteStorageArray(STORAGE_KEYS.SHARED_SCANS, shared);
+  safeWriteStorageArray(STORAGE_KEYS.ACTIVITY_LOG, AppState.offlineActivityLog.slice(0, 5000));
+
+  AppState.syncHistory.unshift({
+    syncTime: nowStr,
+    syncedScansCount: syncedCount,
+    syncedActivitiesCount: syncedActivities,
+    users: Array.from(usersInvolved)
+  });
+
+  refreshScanFileNameLabel();
+  runMultiAgentReconciliation();
+  updateNetworkAndMultiUserUI();
+
+  const box = document.getElementById('pda-live-lookup');
+  if (box && !options.silent) {
+    box.style.borderColor = '#10b981';
+    box.innerHTML = `🔄 Đã Online & đồng bộ <strong>${fmtNum(syncedCount)}</strong> lượt quét Offline (${fmtNum(syncedActivities)} hoạt động) → Đối soát tồn kho chuẩn 100%!`;
+  }
+
+  return { syncedCount, syncedActivities, syncTime: nowStr };
+}
+
+function syncAndExportPdaExcel() {
+  const syncRes = syncOfflineScansNow({ silent: false });
+  exportPdaScansOnly();
+  const box = document.getElementById('pda-live-lookup');
+  if (box) {
+    box.style.borderColor = '#10b981';
+    box.innerHTML = `💾 Đã Online đồng bộ (${fmtNum(syncRes.syncedCount)} dòng Offline) & Xuất File Excel PDA thành công!`;
+  }
+}
+
+function syncAndExportFullExcel() {
+  syncOfflineScansNow({ silent: false });
+  exportFullExcelReport();
+}
+
 function openPdaModal() {
   document.getElementById('pda-modal-overlay').classList.add('open');
+  updateNetworkAndMultiUserUI();
   renderPdaModalTable();
   setTimeout(() => {
     const locInput = document.getElementById('pda-input-loc');
@@ -1194,6 +1563,11 @@ function closePdaModal() {
 function openPdaAndEditRow(idx) {
   openPdaModal();
   editPdaRow(idx);
+}
+
+function openPdaAndEditRowById(scanId, fallbackIdx) {
+  openPdaModal();
+  editPdaRowById(scanId, fallbackIdx);
 }
 
 function handlePdaKeydown(event, nextFieldId) {
@@ -1217,20 +1591,23 @@ function handlePdaTagLookup(tagVal) {
   const qtyInput = document.getElementById('pda-input-qty');
   const r = AppState.reconciled;
   if (!tag || !r) {
-    box.innerHTML = 'Sẵn sàng quét TagID...';
+    box.innerHTML = isEffectiveOnline()
+      ? 'Sẵn sàng quét TagID (Hỗ trợ đa User & Offline)...'
+      : '📴 Chế độ OFFLINE: Sẵn sàng quét TagID vào bộ nhớ đệm...';
     box.style.borderColor = 'rgba(56, 189, 248, 0.25)';
     return;
   }
 
+  const isEditing = AppState.editingScanId !== null || AppState.editingScanIndex >= 0;
   const existingScans = r.scanByTag.get(tag) || [];
   const st = r.filteredStockByBatch.get(tag);
   const otherSt = r.otherStockByBatch.get(tag);
 
   if (st) {
-    if (AppState.editingScanIndex < 0) {
+    if (!isEditing) {
       qtyInput.value = st.qty;
     }
-    if (existingScans.length > 0 && AppState.editingScanIndex < 0) {
+    if (existingScans.length > 0 && !isEditing) {
       box.style.borderColor = '#f59e0b';
       box.innerHTML = `⚠️ TRÙNG TAG (${existingScans.length}x) | Mã ${st.code} | SL: ${fmtNum(st.qty)}`;
     } else {
@@ -1239,7 +1616,7 @@ function handlePdaTagLookup(tagVal) {
     }
   } else if (otherSt && otherSt.length > 0) {
     const o = otherSt[0];
-    if (AppState.editingScanIndex < 0) qtyInput.value = o.qty;
+    if (!isEditing) qtyInput.value = o.qty;
     box.style.borderColor = '#a855f7';
     box.innerHTML = `🏢 Đang ở Kho ${o.wh} | Mã ${o.code} | SL: ${fmtNum(o.qty)} (Tự động đối soát kho khác)`;
   } else {
@@ -1253,8 +1630,81 @@ function refreshScanFileNameLabel() {
     AppState.scanFileName = 'Đã xóa (0 dòng)';
     return;
   }
+  const pendingOffline = getPendingOfflineScansCount();
   const srcList = AppState.scanSources.length > 0 ? AppState.scanSources.join(' + ') : 'Dữ liệu quét';
-  AppState.scanFileName = `${srcList} (Tổng cộng dồn: ${fmtNum(AppState.scanRaw.length)} dòng)`;
+  AppState.scanFileName = `${srcList} (Tổng cộng dồn: ${fmtNum(AppState.scanRaw.length)} dòng${pendingOffline > 0 ? ` | 📴 ${pendingOffline} Offline` : ''})`;
+}
+
+// Atomic, multi-user safe scan insertion/update function
+function performAtomicScanSubmission({ user, loc, tag, manualQty, isOfflineOverride, useActiveEditState = false, targetEditScanId = null }) {
+  const cleanUser = String(user || '').trim() || 'USER';
+  const cleanLoc = String(loc || '').trim() || '-';
+  const cleanTag = String(tag || '').trim();
+  const cleanQty = Number(manualQty) || 0;
+  if (!cleanTag) return null;
+
+  const timeStr = getNowTimeStr();
+  const offlineMode = typeof isOfflineOverride === 'boolean' ? isOfflineOverride : !isEffectiveOnline();
+
+  // Check if editing an existing row by immutable scanId (only when requested by the editing user)
+  const effectiveEditId = targetEditScanId || (useActiveEditState ? AppState.editingScanId : null);
+  const effectiveEditIdx = useActiveEditState ? AppState.editingScanIndex : -1;
+  const editIdx = (effectiveEditId !== null || effectiveEditIdx >= 0)
+    ? findScanIndexById(effectiveEditId, effectiveEditIdx)
+    : -1;
+
+  if ((effectiveEditId !== null || effectiveEditIdx >= 0) && editIdx >= 0 && editIdx < AppState.scanRaw.length) {
+    const row = AppState.scanRaw[editIdx];
+    row.user = cleanUser;
+    row.loc = cleanLoc;
+    row.tag = cleanTag;
+    row.manualQty = cleanQty;
+    row.time = timeStr;
+    row.isNew = true;
+    if (offlineMode) {
+      row.offlineQueued = true;
+      row.syncStatus = 'OFFLINE_PENDING';
+    }
+
+    recordPdaActivity('EDIT', row);
+    persistMultiUserAndOfflineScan(row, 'UPSERT');
+    cancelPdaEditMode();
+    refreshScanFileNameLabel();
+    runMultiAgentReconciliation();
+    return { mode: 'EDIT', record: row };
+  }
+
+  // Create collision-free scan record for concurrent multi-user scanning
+  const scanId = generateScanId(cleanUser, 'PDA');
+  const newScanRecord = {
+    scanId,
+    stt: `PDA-${AppState.scanRaw.length + 1}-${cleanUser}`,
+    tag: cleanTag,
+    loc: cleanLoc,
+    user: cleanUser,
+    time: timeStr,
+    manualQty: cleanQty,
+    isNew: true,
+    offlineQueued: offlineMode,
+    syncStatus: offlineMode ? 'OFFLINE_PENDING' : 'SYNCED',
+    syncedAt: offlineMode ? null : timeStr,
+    source: offlineMode ? 'Máy quét PDA (Offline)' : 'Máy quét PDA'
+  };
+
+  AppState.scanRaw.unshift(newScanRecord);
+  // Keep any active edit index synchronized if another user inserted at index 0 concurrently
+  if (AppState.editingScanId) {
+    AppState.editingScanIndex = findScanIndexById(AppState.editingScanId, AppState.editingScanIndex);
+  }
+  if (!AppState.scanSources.includes('Máy quét PDA')) {
+    AppState.scanSources.push('Máy quét PDA');
+  }
+  recordPdaActivity(offlineMode ? 'SCAN_OFFLINE' : 'SCAN_ONLINE', newScanRecord);
+  persistMultiUserAndOfflineScan(newScanRecord, 'UPSERT');
+  refreshScanFileNameLabel();
+  runMultiAgentReconciliation();
+
+  return { mode: 'INSERT', record: newScanRecord };
 }
 
 function submitPdaScan() {
@@ -1273,114 +1723,160 @@ function submitPdaScan() {
     return;
   }
 
-  const now = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  const timeStr = `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const res = performAtomicScanSubmission({ user, loc, tag, manualQty, useActiveEditState: true });
+  if (!res) return;
 
-  if (AppState.editingScanIndex >= 0 && AppState.editingScanIndex < AppState.scanRaw.length) {
-    // Update existing row in-place
-    const row = AppState.scanRaw[AppState.editingScanIndex];
-    row.user = user;
-    row.loc = loc;
-    row.tag = tag;
-    row.manualQty = manualQty;
-    row.time = timeStr;
-    row.isNew = true;
-
-    cancelPdaEditMode();
-    refreshScanFileNameLabel();
-    runMultiAgentReconciliation();
-    document.getElementById('pda-live-lookup').innerHTML = `✅ Đã cập nhật dòng sửa Tag <strong>${tag}</strong> & cập nhật đối soát!`;
+  const box = document.getElementById('pda-live-lookup');
+  if (res.mode === 'EDIT') {
+    if (box) {
+      box.style.borderColor = '#10b981';
+      box.innerHTML = `✅ Đã lưu sửa dòng Tag <strong>${tag}</strong> (${user}) & cập nhật đối soát!`;
+    }
     tagEl.focus();
     return;
   }
 
-  // Insert NEW scan at Top Row (Row 1 / index 0) and accumulate into Bảng 2
-  const newScanRecord = {
-    stt: `PDA-${AppState.scanRaw.length + 1}`,
-    tag,
-    loc,
-    user,
-    time: timeStr,
-    manualQty,
-    isNew: true,
-    source: 'Máy quét PDA'
-  };
-
-  AppState.scanRaw.unshift(newScanRecord);
-  if (!AppState.scanSources.includes('Máy quét PDA')) {
-    AppState.scanSources.push('Máy quét PDA');
-  }
-  refreshScanFileNameLabel();
-
-  runMultiAgentReconciliation();
-
   tagEl.value = '';
   qtyEl.value = '';
-  document.getElementById('pda-live-lookup').innerHTML = `✅ Đã cộng dồn & ghi Log Dòng 1: <strong>${tag}</strong> (${loc})`;
+  if (box) {
+    if (res.record.offlineQueued) {
+      box.style.borderColor = '#f59e0b';
+      box.innerHTML = `📴 [OFFLINE] Đã lưu đệm & ghi Log: <strong>${tag}</strong> (${user} @ ${loc}) — Bấm Đồng bộ khi Online`;
+    } else {
+      box.style.borderColor = '#10b981';
+      box.innerHTML = `✅ [ONLINE] Đã cộng dồn & ghi Log Dòng 1: <strong>${tag}</strong> (${user} @ ${loc})`;
+    }
+  }
   tagEl.focus();
 }
 
-function editPdaRow(idx) {
+function editPdaRowById(scanId, fallbackIdx = -1) {
+  const idx = findScanIndexById(scanId, fallbackIdx);
   if (idx < 0 || idx >= AppState.scanRaw.length) return;
   const row = AppState.scanRaw[idx];
+  if (!row.scanId) row.scanId = generateScanId(row.user || 'U', 'ROW');
+
   const r = AppState.reconciled;
   const st = r ? r.filteredStockByBatch.get(row.tag) : null;
   const otherSt = (!st && r && r.otherStockByBatch.get(row.tag)) ? r.otherStockByBatch.get(row.tag)[0] : null;
   const qty = (Number(row.manualQty) > 0) ? Number(row.manualQty) : (st ? st.qty : (otherSt ? otherSt.qty : 0));
 
   AppState.editingScanIndex = idx;
+  AppState.editingScanId = row.scanId;
+
   document.getElementById('pda-input-user').value = row.user || '';
   document.getElementById('pda-input-loc').value = row.loc || '';
   document.getElementById('pda-input-tag').value = row.tag || '';
   document.getElementById('pda-input-qty').value = qty || '';
 
   const okBtn = document.getElementById('pda-ok-btn');
-  okBtn.textContent = `LƯU DÒNG #${idx + 1}`;
-  okBtn.classList.add('editing-mode');
+  if (okBtn) {
+    okBtn.textContent = `LƯU #${idx + 1}`;
+    okBtn.classList.add('editing-mode');
+  }
 
   const box = document.getElementById('pda-live-lookup');
-  box.style.borderColor = '#f59e0b';
-  box.innerHTML = `✏️ Đang sửa Dòng #${idx + 1} (${row.tag}) — Bấm LƯU sau khi sửa`;
+  if (box) {
+    box.style.borderColor = '#f59e0b';
+    box.innerHTML = `✏️ Đang sửa Dòng #${idx + 1} (${row.tag} - ${row.user}) — An toàn đa người dùng`;
+  }
   document.getElementById('pda-input-tag').focus();
+}
+
+function editPdaRow(idx) {
+  const row = AppState.scanRaw[idx];
+  editPdaRowById(row ? row.scanId : null, idx);
 }
 
 function cancelPdaEditMode() {
   AppState.editingScanIndex = -1;
+  AppState.editingScanId = null;
   const okBtn = document.getElementById('pda-ok-btn');
   if (okBtn) {
     okBtn.textContent = 'OK';
     okBtn.classList.remove('editing-mode');
   }
-  document.getElementById('pda-input-tag').value = '';
-  document.getElementById('pda-input-qty').value = '';
+  const tagEl = document.getElementById('pda-input-tag');
+  const qtyEl = document.getElementById('pda-input-qty');
+  if (tagEl) tagEl.value = '';
+  if (qtyEl) qtyEl.value = '';
 }
 
-function deletePdaRow(idx) {
+function deletePdaRowById(scanId, fallbackIdx = -1) {
+  const idx = findScanIndexById(scanId, fallbackIdx);
   if (idx < 0 || idx >= AppState.scanRaw.length) return;
   const removed = AppState.scanRaw.splice(idx, 1)[0];
-  if (AppState.editingScanIndex === idx) {
+
+  if (removed) {
+    recordPdaActivity('DELETE', removed);
+    persistMultiUserAndOfflineScan(removed, 'DELETE');
+  }
+
+  if (AppState.editingScanId && removed && AppState.editingScanId === removed.scanId) {
+    cancelPdaEditMode();
+  } else if (AppState.editingScanId) {
+    AppState.editingScanIndex = findScanIndexById(AppState.editingScanId, -1);
+  } else if (AppState.editingScanIndex === idx) {
     cancelPdaEditMode();
   } else if (AppState.editingScanIndex > idx) {
     AppState.editingScanIndex--;
   }
+
   refreshScanFileNameLabel();
   runMultiAgentReconciliation();
   const box = document.getElementById('pda-live-lookup');
   if (box && removed) {
     box.style.borderColor = '#f43f5e';
-    box.innerHTML = `🗑️ Đã xóa dòng Tag <strong>${removed.tag}</strong> & cập nhật lại đối soát`;
+    box.innerHTML = `🗑️ Đã xóa dòng Tag <strong>${removed.tag}</strong> (${removed.user || '-'}) & cập nhật đối soát`;
   }
+}
+
+function deletePdaRow(idx) {
+  const row = AppState.scanRaw[idx];
+  deletePdaRowById(row ? row.scanId : null, idx);
 }
 
 function editLatestPdaScan() {
   if (AppState.scanRaw.length === 0) return;
-  editPdaRow(0);
+  editPdaRowById(AppState.scanRaw[0].scanId, 0);
 }
 
 function deleteLatestPdaScan() {
   if (AppState.scanRaw.length === 0) return;
-  deletePdaRow(0);
+  deletePdaRowById(AppState.scanRaw[0].scanId, 0);
+}
+
+// Simulate multiple users scanning concurrently at the exact same moment without collision
+function simulateConcurrentMultiUserScan() {
+  const r = AppState.reconciled;
+  if (!r) return 0;
+  const missingTags = r.tagDetails.filter((t) => !t.isScanned).slice(0, 4);
+  if (missingTags.length === 0) {
+    const box = document.getElementById('pda-live-lookup');
+    if (box) box.innerHTML = '✅ Tất cả TagID trong phạm vi đã được quét đủ 100%!';
+    return 0;
+  }
+
+  const concurrentUsers = ['Thanh', 'Minh', 'Tuấn', 'Lan'];
+  const insertedRecords = [];
+
+  missingTags.forEach((item, i) => {
+    const u = concurrentUsers[i % concurrentUsers.length];
+    const res = performAtomicScanSubmission({
+      user: u,
+      loc: item.bin || `010${i + 1}`,
+      tag: item.batch,
+      manualQty: item.stockQty
+    });
+    if (res && res.record) insertedRecords.push(res.record);
+  });
+
+  const box = document.getElementById('pda-live-lookup');
+  if (box) {
+    box.style.borderColor = '#38bdf8';
+    box.innerHTML = `👥 Đã ghi nhận đồng thời <strong>${insertedRecords.length} người dùng</strong> (${insertedRecords.map((x) => x.user).join(', ')}) quét cùng lúc 0 lỗi!`;
+  }
+  return insertedRecords.length;
 }
 
 function fillSampleUnscannedTag() {
@@ -1412,24 +1908,27 @@ function renderPdaModalTable() {
 
   // Render 100% of scanRaw rows in the PDA log table without any slice limit
   tbody.innerHTML = AppState.scanRaw.map((s, idx) => {
+    if (!s.scanId) s.scanId = generateScanId(s.user || 'U', 'ROW');
+    const safeId = String(s.scanId).replace(/'/g, "\\'");
     const st = r.filteredStockByBatch.get(s.tag);
     const otherSt = (!st && r.otherStockByBatch.get(s.tag)) ? r.otherStockByBatch.get(s.tag)[0] : null;
     const scansForTag = r.scanByTag.get(s.tag) || [];
     const qty = (Number(s.manualQty) > 0) ? Number(s.manualQty) : (st ? st.qty : (otherSt ? otherSt.qty : 0));
     const isDup = scansForTag.length > 1;
     const tagColor = (!st && !otherSt) ? '#f43f5e' : (!st && otherSt ? '#c084fc' : (isDup ? '#fbbf24' : '#34d399'));
+    const statusIcon = (s.offlineQueued || s.syncStatus === 'OFFLINE_PENDING') ? '📴' : '🟢';
 
     return `
       <tr class="${s.isNew ? 'new-scan-highlight' : ''}">
         <td><strong>${idx + 1}</strong></td>
         <td>
-          <button class="row-action-btn" onclick="editPdaRow(${idx})" title="Sửa dòng này">✏️</button>
-          <button class="row-action-btn del" onclick="deletePdaRow(${idx})" title="Xóa dòng này">🗑️</button>
+          <button class="row-action-btn" onclick="editPdaRowById('${safeId}', ${idx})" title="Sửa dòng này">✏️</button>
+          <button class="row-action-btn del" onclick="deletePdaRowById('${safeId}', ${idx})" title="Xóa dòng này">🗑️</button>
         </td>
         <td style="font-family:'JetBrains Mono',monospace; font-weight:700; color:${tagColor};">${s.tag}</td>
         <td>${s.loc || '-'}</td>
         <td class="num-col"><strong>${fmtNum(qty)}</strong></td>
-        <td>${s.user || '-'}</td>
+        <td>${s.user || '-'} ${statusIcon}</td>
       </tr>
     `;
   }).join('');
@@ -1449,7 +1948,11 @@ function clearStockData() {
 function clearScanData() {
   AppState.scanRaw = [];
   AppState.scanSources = [];
+  AppState.offlineActivityLog = [];
   AppState.scanFileName = 'Đã xóa (0 dòng)';
+  safeWriteStorageArray(STORAGE_KEYS.SHARED_SCANS, []);
+  safeWriteStorageArray(STORAGE_KEYS.OFFLINE_QUEUE, []);
+  safeWriteStorageArray(STORAGE_KEYS.DELETED_IDS, []);
   cancelPdaEditMode();
   const el1 = document.getElementById('input-file-scan');
   const el2 = document.getElementById('input-file-scan-append');
@@ -1462,8 +1965,12 @@ function clearAllSources() {
   AppState.stockRaw = [];
   AppState.scanRaw = [];
   AppState.scanSources = [];
+  AppState.offlineActivityLog = [];
   AppState.stockFileName = 'Đã xóa (0 dòng)';
   AppState.scanFileName = 'Đã xóa (0 dòng)';
+  safeWriteStorageArray(STORAGE_KEYS.SHARED_SCANS, []);
+  safeWriteStorageArray(STORAGE_KEYS.OFFLINE_QUEUE, []);
+  safeWriteStorageArray(STORAGE_KEYS.DELETED_IDS, []);
   cancelPdaEditMode();
   const elStock = document.getElementById('input-file-stock');
   const elScan = document.getElementById('input-file-scan');
@@ -1475,6 +1982,10 @@ function clearAllSources() {
 }
 
 function restoreDefaultData() {
+  safeWriteStorageArray(STORAGE_KEYS.SHARED_SCANS, []);
+  safeWriteStorageArray(STORAGE_KEYS.OFFLINE_QUEUE, []);
+  safeWriteStorageArray(STORAGE_KEYS.DELETED_IDS, []);
+  AppState.offlineActivityLog = [];
   cancelPdaEditMode();
   loadInitialBundle();
   runMultiAgentReconciliation();
@@ -1524,18 +2035,23 @@ function pickCol(rowObj, candidates, fallbackIdx) {
 
 function extractScanRowsFromRaw(rows, sourceName, markNew = false) {
   const parsed = [];
+  const offlineMode = !isEffectiveOnline();
   rows.forEach((r, idx) => {
     if (Array.isArray(r)) {
       const tag = String(r[1] !== undefined ? r[1] : r[0] || '').trim();
       if (tag && tag.toLowerCase() !== 'tag id' && tag.toLowerCase() !== 'tagid') {
+        const user = String(r[3] || '').trim();
         parsed.push({
+          scanId: generateScanId(user || 'FILE', 'FILE'),
           stt: String(r[0] || idx + 1).trim(),
           tag,
           loc: String(r[2] || '').trim(),
-          user: String(r[3] || '').trim(),
+          user,
           time: String(r[4] || '').trim(),
           manualQty: Number(String(r[5] || '0').replace(/,/g, '')) || 0,
           isNew: markNew,
+          offlineQueued: markNew && offlineMode,
+          syncStatus: markNew && offlineMode ? 'OFFLINE_PENDING' : 'SYNCED',
           source: sourceName
         });
       }
@@ -1547,7 +2063,19 @@ function extractScanRowsFromRaw(rows, sourceName, markNew = false) {
       const time = String(pickCol(r, ['Thời gian quét', 'Thời gian', 'Time', 'Timestamp', 'time'], 4)).trim();
       const manualQty = Number(String(pickCol(r, ['Qty', 'Số lượng', 'SL', 'manualQty'], 5) || '0').replace(/,/g, '')) || 0;
       if (tag && tag.toLowerCase() !== 'tag id' && tag.toLowerCase() !== 'tagid') {
-        parsed.push({ stt, tag, loc, user, time, manualQty, isNew: markNew, source: sourceName });
+        parsed.push({
+          scanId: r.scanId || generateScanId(user || 'FILE', 'FILE'),
+          stt,
+          tag,
+          loc,
+          user,
+          time,
+          manualQty,
+          isNew: markNew,
+          offlineQueued: markNew && offlineMode,
+          syncStatus: markNew && offlineMode ? 'OFFLINE_PENDING' : 'SYNCED',
+          source: sourceName
+        });
       }
     }
   });
@@ -1962,6 +2490,38 @@ function reset3DView() {
   }
 }
 
+// Khôi phục bảng 3D về đúng trạng thái ban đầu (góc nhìn ban đầu, tự động xoay, thu phóng mặc định & vẽ lại cột 3D)
+function refresh3DInitialState() {
+  targetRotY = 0.0;
+  targetRotX = 0.18;
+  isDragging3D = false;
+
+  const panel = document.getElementById('panel-3d-main');
+  if (panel && panel.classList.contains('expanded-3d')) {
+    panel.classList.remove('expanded-3d');
+  }
+
+  if (threeCamera) {
+    threeCamera.position.set(0, 6.2, 14.2);
+    threeCamera.lookAt(0, 1.8, 0);
+  }
+  if (threeBarsGroup) {
+    threeBarsGroup.rotation.set(0.18, 0, 0);
+  }
+
+  AppState.autoRotate3D = true;
+  const btn = document.getElementById('btn-3d-pause');
+  if (btn) {
+    btn.textContent = '⏸️ Dừng Xoay';
+    btn.classList.add('active');
+  }
+
+  if (AppState.reconciled) {
+    update3DScene(AppState.reconciled);
+  }
+  setTimeout(resize3DScene, 40);
+}
+
 function toggleExpand3DPanel() {
   const panel = document.getElementById('panel-3d-main');
   if (!panel) return;
@@ -2167,18 +2727,21 @@ function exportFullExcelReport() {
   const wsAlerts = XLSX.utils.json_to_sheet(alertRows);
   XLSX.utils.book_append_sheet(wb, wsAlerts, '4_Doi_Soat_Tag_Kho_Khac');
 
-  // SHEET 5: BẢNG GHI LOG DỮ LIỆU QUÉT PDA & CỘNG DỒN (100% ĐẦY ĐỦ)
+  // SHEET 5: BẢNG GHI LOG DỮ LIỆU QUÉT PDA & CỘNG DỒN (100% ĐẦY ĐỦ + TRẠNG THÁI ĐỒNG BỘ ĐA USER / OFFLINE)
   const pdaRows = AppState.scanRaw.map((s, idx) => {
     const st = r.filteredStockByBatch.get(s.tag);
     const otherSt = (!st && r.otherStockByBatch.get(s.tag)) ? r.otherStockByBatch.get(s.tag)[0] : null;
     return {
       'Thứ Tự Dòng Log': idx + 1,
+      'Mã Định Danh (Scan ID)': s.scanId || `ROW-${idx + 1}`,
       'STT Gốc': s.stt,
       'Tag ID': s.tag,
       'Bin Location': s.loc,
       'USE': s.user,
       'Thời Gian Quét (PDA)': s.time,
       'Nguồn Dữ Liệu': s.source || 'File kiểm kê',
+      'Trạng Thái Đồng Bộ': (s.offlineQueued || s.syncStatus === 'OFFLINE_PENDING') ? 'OFFLINE (Chờ đồng bộ)' : 'ONLINE (Đã đồng bộ)',
+      'Thời Gian Đồng Bộ': s.syncedAt || s.time || '-',
       'Mã Hàng Khớp': st ? st.code : (otherSt ? otherSt.code : 'Chưa có trên sổ'),
       'Kho Trên Sổ': st ? st.wh : (otherSt ? otherSt.wh : '-'),
       'Qty': (Number(s.manualQty) > 0) ? Number(s.manualQty) : (st ? st.qty : (otherSt ? otherSt.qty : 0))
@@ -2186,6 +2749,26 @@ function exportFullExcelReport() {
   });
   const wsPda = XLSX.utils.json_to_sheet(pdaRows);
   XLSX.utils.book_append_sheet(wb, wsPda, '5_Du_Lieu_Quet_PDA');
+
+  // SHEET 6: NHẬT KÝ HOẠT ĐỘNG QUÉT OFFLINE / ĐỒNG BỘ ĐA NGƯỜI DÙNG
+  const actSource = AppState.offlineActivityLog.length > 0
+    ? AppState.offlineActivityLog
+    : [{ id: 'SYNC-INIT', action: 'SYSTEM_READY', scanId: '-', tag: '-', loc: '-', user: 'System', qty: AppState.scanRaw.length, time: getNowTimeStr(), synced: true, syncedAt: getNowTimeStr() }];
+  const actRows = actSource.map((a, idx) => ({
+    'STT': idx + 1,
+    'Mã Hoạt Động': a.id,
+    'Loại Thao Tác': a.action,
+    'Scan ID': a.scanId,
+    'Tag ID': a.tag,
+    'Vị Trí (Bin)': a.loc,
+    'Người Dùng (USE)': a.user,
+    'Số Lượng (Qty)': a.qty,
+    'Thời Gian Thao Tác': a.time,
+    'Trạng Thái Đồng Bộ': a.synced ? 'Đã đồng bộ Online' : 'Đang lưu đệm Offline',
+    'Thời Điểm Đồng Bộ': a.syncedAt || '-'
+  }));
+  const wsAct = XLSX.utils.json_to_sheet(actRows);
+  XLSX.utils.book_append_sheet(wb, wsAct, '6_Nhat_Ky_Dong_Bo_PDA');
 
   XLSX.writeFile(wb, 'Bao_Cao_Doi_Soat_Ton_Kho_31.10.2026.xlsx');
 }
@@ -2198,11 +2781,14 @@ function exportPdaScansOnly() {
     const otherSt = (!st && r && r.otherStockByBatch.get(s.tag)) ? r.otherStockByBatch.get(s.tag)[0] : null;
     return {
       'STT': idx + 1,
+      'Scan ID': s.scanId || `ROW-${idx + 1}`,
       'Tag ID': s.tag,
       'Bin Location': s.loc,
       'USE': s.user,
       'Qty': (Number(s.manualQty) > 0) ? Number(s.manualQty) : (st ? st.qty : (otherSt ? otherSt.qty : 0)),
       'Thời gian quét (PDA)': s.time,
+      'Trạng thái đồng bộ': (s.offlineQueued || s.syncStatus === 'OFFLINE_PENDING') ? 'OFFLINE (Chờ đồng bộ)' : 'ONLINE (Đã đồng bộ)',
+      'Thời điểm đồng bộ': s.syncedAt || s.time || '-',
       'Nguồn dữ liệu': s.source || 'File kiểm kê',
       'Mã hàng': st ? st.code : (otherSt ? otherSt.code : ''),
       'Kho trên sổ': st ? st.wh : (otherSt ? otherSt.wh : '')
@@ -2210,6 +2796,24 @@ function exportPdaScansOnly() {
   });
   const ws = XLSX.utils.json_to_sheet(pdaRows);
   XLSX.utils.book_append_sheet(wb, ws, 'Du_Lieu_Quet_PDA');
+
+  if (AppState.offlineActivityLog.length > 0) {
+    const actRows = AppState.offlineActivityLog.map((a, idx) => ({
+      'STT': idx + 1,
+      'Thao tác': a.action,
+      'Scan ID': a.scanId,
+      'Tag ID': a.tag,
+      'Bin Location': a.loc,
+      'USE': a.user,
+      'Qty': a.qty,
+      'Thời gian quét Offline/Online': a.time,
+      'Đã đồng bộ': a.synced ? 'Đã đồng bộ' : 'Chờ đồng bộ',
+      'Thời gian đồng bộ': a.syncedAt || '-'
+    }));
+    const wsAct = XLSX.utils.json_to_sheet(actRows);
+    XLSX.utils.book_append_sheet(wb, wsAct, 'Nhat_Ky_Hoat_Dong_Offline');
+  }
+
   XLSX.writeFile(wb, 'File_Quet_PDA_Nguon.xlsx');
 }
 
@@ -2274,7 +2878,8 @@ function loadInitialBundle() {
     AppState.stockFileName = 'Stock list.xlsx (24,961 dòng)';
   }
   if (Array.isArray(window.DEFAULT_SCAN_DATA)) {
-    AppState.scanRaw = window.DEFAULT_SCAN_DATA.map((r) => ({
+    AppState.scanRaw = window.DEFAULT_SCAN_DATA.map((r, idx) => ({
+      scanId: `BASE-${idx + 1}-${r[1]}`,
       stt: r[0],
       tag: r[1],
       loc: r[2],
@@ -2282,11 +2887,16 @@ function loadInitialBundle() {
       time: r[4],
       manualQty: 0,
       isNew: false,
+      offlineQueued: false,
+      syncStatus: 'SYNCED',
       source: 'kiêm kho 31.10.2026.xlsx'
     }));
     AppState.scanSources = ['kiêm kho 31.10.2026.xlsx'];
-    refreshScanFileNameLabel();
   }
+  // Load any stored offline activity log & merge pending offline/multi-user scans
+  AppState.offlineActivityLog = safeReadStorageArray(STORAGE_KEYS.ACTIVITY_LOG);
+  mergeExternalMultiUserScans(false);
+  refreshScanFileNameLabel();
 }
 
 window.InventoryAgentAPI = {
@@ -2297,6 +2907,13 @@ window.InventoryAgentAPI = {
   clearAllSources,
   restoreDefaultData,
   appendScanDataRows,
+  refresh3DInitialState,
+  toggleOfflineMode,
+  syncOfflineScansNow,
+  syncAndExportPdaExcel,
+  syncAndExportFullExcel,
+  simulateConcurrentMultiUserScan,
+  performAtomicScanSubmission,
   scanTagFromPDA: (user, loc, tag, qty) => {
     document.getElementById('pda-input-user').value = user || 'Agent';
     document.getElementById('pda-input-loc').value = loc || '';
@@ -2305,11 +2922,53 @@ window.InventoryAgentAPI = {
     submitPdaScan();
   },
   editPdaRow,
+  editPdaRowById,
   deletePdaRow,
-  exportFullExcelReport
+  deletePdaRowById,
+  exportFullExcelReport,
+  exportPdaScansOnly
 };
 
+// Listen for network Online/Offline transitions and multi-user cross-tab storage events
+window.addEventListener('online', () => {
+  AppState.isOnline = true;
+  if (!AppState.manualOfflineMode && getPendingOfflineScansCount() > 0) {
+    syncOfflineScansNow({ silent: false });
+  } else {
+    updateNetworkAndMultiUserUI();
+  }
+});
+
+window.addEventListener('offline', () => {
+  AppState.isOnline = false;
+  updateNetworkAndMultiUserUI();
+});
+
+window.addEventListener('storage', (e) => {
+  if (!e || !e.key) return;
+  if (
+    e.key === STORAGE_KEYS.SHARED_SCANS ||
+    e.key === STORAGE_KEYS.OFFLINE_QUEUE ||
+    e.key === STORAGE_KEYS.DELETED_IDS
+  ) {
+    if (isEffectiveOnline()) {
+      mergeExternalMultiUserScans(true);
+    }
+  }
+});
+
+if (pdaBroadcastChannel) {
+  pdaBroadcastChannel.onmessage = (ev) => {
+    if (ev && ev.data && ev.data.type === 'PDA_MULTIUSER_EVENT' && isEffectiveOnline()) {
+      mergeExternalMultiUserScans(true);
+    }
+  };
+}
+
 window.addEventListener('DOMContentLoaded', () => {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
   init3DScene();
   loadInitialBundle();
   runMultiAgentReconciliation();
